@@ -4,7 +4,6 @@ import java.nio.charset.StandardCharsets;
 
 
 public class ExtraCRNTest {
-    int x;
     public static void main(String[] args) {
         try {
             // Create and configure a Node instance
