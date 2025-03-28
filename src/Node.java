@@ -12,11 +12,11 @@
 // These descriptions are intended to help you understand how the interface
 // will be used. See the RFC for how the protocol works.
 
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.SocketTimeoutException;
+import java.net.*;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.*;
 import java.util.*;
+import java.security.MessageDigest;
 
 interface NodeInterface {
 
@@ -87,178 +87,199 @@ interface NodeInterface {
 
 // Complete this!
 public class Node implements NodeInterface {
-
     private String nodeName;
+    private byte[] nodeHash;
     private DatagramSocket socket;
-    private int port;
 
-    private final Map<String, String> addressStore = new HashMap<>();
-    private byte[] myHashID;
-    private final Stack<String> relayStack = new Stack<>();
-    private final Map<Integer, List<Map.Entry<String, String>>> addressByDistance = new HashMap<>();
+    // A simple key/value store for data pairs (for keys starting with "D:")
+    private ConcurrentMap<String, String> dataStore = new ConcurrentHashMap<>();
 
+    // A stack to maintain relay nodes
+    private Deque<String> relayStack = new ConcurrentLinkedDeque<>();
+
+    // Set the node name and compute its hashID using HashID.computeHashID.
     @Override
     public void setNodeName(String nodeName) throws Exception {
         this.nodeName = nodeName;
+        this.nodeHash = HashID.computeHashID(nodeName);
+        System.out.println("Node name set to " + nodeName);
     }
 
+    // Open a UDP port for sending and receiving messages.
     @Override
     public void openPort(int portNumber) throws Exception {
-        this.port = portNumber;
-        this.socket = new DatagramSocket(portNumber);
-
-        String address = "127.0.0.1:" + portNumber;
-        addressStore.put(nodeName, address);
-        myHashID = HashID.computeHashID(nodeName);
-        System.out.println("Stored own address: " + nodeName + " → " + address);
+        socket = new DatagramSocket(portNumber);
+        System.out.println("Opened UDP port " + portNumber);
     }
 
+    // This method listens for incoming UDP messages for a specified delay (in milliseconds).
+    // It parses each message and dispatches the handling based on the command.
     @Override
     public void handleIncomingMessages(int delay) throws Exception {
-        byte[] buffer = new byte[2048];
+        byte[] buffer = new byte[1024];
         DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-
-        if (delay == 0) {
-            socket.setSoTimeout(0);
-        } else {
+        // Set a timeout if delay > 0, otherwise block indefinitely.
+        if (delay > 0) {
             socket.setSoTimeout(delay);
+        } else {
+            socket.setSoTimeout(0);
         }
-
         try {
-            socket.receive(packet);
-            String msg = new String(packet.getData(), 0, packet.getLength(), "UTF-8");
-            System.out.println("Received: " + msg);
-            processMessage(msg, packet.getAddress(), packet.getPort());
-        } catch (SocketTimeoutException e) {
-            // timeout
-        }
-    }
-
-    private void processMessage(String msg, InetAddress senderAddress, int senderPort) throws Exception {
-        String[] parts = msg.split(" ", 3);
-        if (parts.length < 2) return;
-
-        String txID = parts[0];
-        String type = parts[1];
-
-        if (type.equals("G")) {
-            String response = txID + " H " + nodeName + " ";
-            byte[] data = response.getBytes("UTF-8");
-            DatagramPacket responsePacket = new DatagramPacket(data, data.length, senderAddress, senderPort);
-            socket.send(responsePacket);
-            System.out.println("Replied with: " + response);
-
-        } else if (type.equals("H")) {
-            System.out.println("Received name response: " + msg);
-
-        } else if (type.equals("W")) {
-            String[] kvParts = parts[2].split(" ", 4);
-            if (kvParts.length < 4) return;
-
-            String key = kvParts[1];
-            String value = kvParts[3];
-
-            if (!key.startsWith("N:")) return;
-
-            byte[] keyHash = HashID.computeHashID(key);
-            int dist = hashDistance(myHashID, keyHash);
-
-            List<Map.Entry<String, String>> list = addressByDistance.getOrDefault(dist, new ArrayList<>());
-            boolean alreadyPresent = list.stream().anyMatch(e -> e.getKey().equals(key));
-
-            if (!alreadyPresent && list.size() < 3) {
-                list.add(Map.entry(key, value));
-                addressByDistance.put(dist, list);
-                addressStore.put(key, value);
-                System.out.println("Stored address key: " + key + " → " + value + " at distance " + dist);
+            while (true) {
+                socket.receive(packet);
+                String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
+                System.out.println("Received: " + message);
+                processMessage(message, packet.getAddress(), packet.getPort());
             }
-
-            String response = parts[0] + " X A";
-            sendMessage(response, senderAddress, senderPort);
+        } catch (SocketTimeoutException ste) {
+            // No message received within the delay period; exit the method.
         }
     }
 
-    private int hashDistance(byte[] a, byte[] b) {
-        int matchingBits = 0;
-        for (int i = 0; i < a.length; i++) {
-            int xor = (a[i] ^ b[i]) & 0xFF;
-            for (int bit = 7; bit >= 0; bit--) {
-                if ((xor & (1 << bit)) == 0) {
-                    matchingBits++;
-                } else {
-                    return 256 - matchingBits;
+    // Parse a received message and dispatch to the appropriate handler.
+    // We assume a simplified protocol format: "<TID> <command> <payload>"
+    private void processMessage(String message, InetAddress address, int port) {
+        String[] parts = message.split(" ", 3);
+        if (parts.length < 2) {
+            System.out.println("Invalid message format");
+            return;
+        }
+        String transactionId = parts[0];
+        String command = parts[1];
+        String payload = (parts.length >= 3) ? parts[2] : "";
+
+        switch (command) {
+            case "G": // Name request: reply with our node name.
+                sendNameResponse(transactionId, address, port);
+                break;
+            case "R": // Read request: payload contains the key.
+                sendReadResponse(transactionId, payload, address, port);
+                break;
+            case "W": // Write request: payload contains key and value separated by a space.
+                String[] kv = payload.split(" ", 2);
+                if (kv.length == 2) {
+                    boolean writeResult = false;
+                    try {
+                        writeResult = write(kv[0], kv[1]);
+                    } catch (Exception e) {
+                        System.err.println("Error in write: " + e.getMessage());
+                    }
+                    sendWriteResponse(transactionId, writeResult, address, port);
                 }
-            }
+                break;
+            case "C": // Compare And Swap (CAS) request: payload has key, currentValue, newValue.
+                String[] partsCAS = payload.split(" ", 3);
+                if (partsCAS.length == 3) {
+                    boolean casResult = false;
+                    try {
+                        casResult = CAS(partsCAS[0], partsCAS[1], partsCAS[2]);
+                    } catch (Exception e) {
+                        System.err.println("Error in CAS: " + e.getMessage());
+                    }
+                    sendCASResponse(transactionId, casResult, address, port);
+                }
+                break;
+            default:
+                System.out.println("Unknown command: " + command);
         }
-        return 0;
     }
 
-    private String generateTxID() {
-        Random rand = new Random();
-        char a = (char) ('A' + rand.nextInt(26));
-        char b = (char) ('A' + rand.nextInt(26));
-        return "" + a + b;
+    // Send a name response message in reply to a name request.
+    private void sendNameResponse(String transactionId, InetAddress address, int port) {
+        String response = transactionId + " H " + nodeName;
+        sendResponse(response, address, port);
     }
 
-    private void sendMessage(String msg, InetAddress ip, int port) throws Exception {
-        byte[] data = msg.getBytes("UTF-8");
-        DatagramPacket packet = new DatagramPacket(data, data.length, ip, port);
-        socket.send(packet);
-    }
-
-    @Override
-    public boolean isActive(String targetNodeName) throws Exception {
-        String address = addressStore.get(targetNodeName);
-        if (address == null) return false;
-
-        String[] parts = address.split(":");
-        InetAddress ip = InetAddress.getByName(parts[0]);
-        int targetPort = Integer.parseInt(parts[1]);
-
-        String txID = generateTxID();
-        String request = txID + " G";
-        sendMessage(request, ip, targetPort);
-
-        socket.setSoTimeout(5000);
-        byte[] buffer = new byte[2048];
-        DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-
+    // Send a read response. If the key exists, respond with "Y" and the value; otherwise "N".
+    private void sendReadResponse(String transactionId, String key, InetAddress address, int port) {
+        String value = null;
         try {
-            socket.receive(packet);
-            String response = new String(packet.getData(), 0, packet.getLength(), "UTF-8");
-            return response.startsWith(txID + " H " + targetNodeName);
-        } catch (SocketTimeoutException e) {
-            return false;
+            value = read(key);
+        } catch (Exception e) {
+            System.err.println("Error in read: " + e.getMessage());
+        }
+        String response;
+        if (value != null) {
+            response = transactionId + " S Y " + value;
+        } else {
+            response = transactionId + " S N";
+        }
+        sendResponse(response, address, port);
+    }
+
+    // Send a write response message. In this simplified version, we always return a success code.
+    private void sendWriteResponse(String transactionId, boolean success, InetAddress address, int port) {
+        // For simplicity, we return "A" for a new value or replacement.
+        String response = transactionId + " X " + (success ? "A" : "X");
+        sendResponse(response, address, port);
+    }
+
+    // Send a CAS response message. Return "R" if successful, "N" otherwise.
+    private void sendCASResponse(String transactionId, boolean success, InetAddress address, int port) {
+        String response = transactionId + " D " + (success ? "R" : "N");
+        sendResponse(response, address, port);
+    }
+
+    // Helper method to send a UDP response.
+    private void sendResponse(String response, InetAddress address, int port) {
+        byte[] respBytes = response.getBytes(StandardCharsets.UTF_8);
+        DatagramPacket respPacket = new DatagramPacket(respBytes, respBytes.length, address, port);
+        try {
+            socket.send(respPacket);
+            System.out.println("Sent response: " + response);
+        } catch (Exception e) {
+            System.err.println("Error sending response: " + e.getMessage());
         }
     }
 
+    // Check if a node is active.
+    // In this simple implementation, we return true if the provided name matches our node.
+    @Override
+    public boolean isActive(String nodeName) throws Exception {
+        return this.nodeName != null && this.nodeName.equals(nodeName);
+    }
+
+    // Add a node name to the relay stack.
     @Override
     public void pushRelay(String nodeName) throws Exception {
         relayStack.push(nodeName);
+        System.out.println("Pushed relay: " + nodeName);
     }
 
+    // Remove the top node name from the relay stack.
     @Override
     public void popRelay() throws Exception {
         if (!relayStack.isEmpty()) {
-            relayStack.pop();
+            String removed = relayStack.pop();
+            System.out.println("Popped relay: " + removed);
         }
     }
 
-
-
+    // Check if a given key exists in the data store.
+    @Override
     public boolean exists(String key) throws Exception {
-	throw new Exception("Not implemented");
+        return dataStore.containsKey(key);
     }
-    
+
+    // Read the value associated with a key.
+    @Override
     public String read(String key) throws Exception {
-	throw new Exception("Not implemented");
+        return dataStore.get(key);
     }
 
+    // Write a key/value pair into the data store.
+    @Override
     public boolean write(String key, String value) throws Exception {
-	throw new Exception("Not implemented");
+        dataStore.put(key, value);
+        System.out.println("Written key: " + key + " with value: " + value);
+        return true;
     }
 
+    // Perform an atomic compare-and-swap on a key/value pair.
+    @Override
     public boolean CAS(String key, String currentValue, String newValue) throws Exception {
-	throw new Exception("Not implemented");
+        boolean success = dataStore.replace(key, currentValue, newValue);
+        System.out.println("CAS on key: " + key + " from '" + currentValue + "' to '" + newValue + "' " + (success ? "succeeded" : "failed"));
+        return success;
     }
 }
