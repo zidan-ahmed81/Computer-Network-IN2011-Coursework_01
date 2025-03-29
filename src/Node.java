@@ -197,6 +197,10 @@ public class Node implements NodeInterface {
             case "V": // Relay message
                 processRelayMessage(transactionId, payload, address, port);
                 break;
+            case "I": // Information message
+                System.out.println("Received Information message: " + payload);
+                // No response required
+                break;
             default:
                 System.out.println("Unknown command: " + command);
         }

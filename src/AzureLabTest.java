@@ -20,24 +20,13 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.Date;
-import java.util.Random;
 
 class AzureLabTest {
     public static void main (String [] args) {
-        String emailAddress = "Put your e-mail address here!";
-        if (false && emailAddress.indexOf('@') == -1) {
-            System.err.println("Please set your e-mail address!");
-            System.exit(1);
-        }
-        String ipAddress = "Put the IP address of Azure lab machine here!  It should start with 10";
-        if (false && ipAddress.indexOf('.') == -1) {
-            System.err.println("Please set your ip address!");
-            System.exit(1);
-        }
+        String emailAddress = "your.name@city.ac.uk"; // Replace with your actual email
+        String ipAddress = "10.216.34.203"; // Replace with your Azure VM's IP
 
         try {
-            // Create a node and initialise it
             Node node = new Node();
             String nodeName = "N:" + emailAddress;
             node.setNodeName(nodeName);
@@ -45,48 +34,67 @@ class AzureLabTest {
             int port = 20110;
             node.openPort(port);
 
-            // Wait and hope that we get sent the address of some other nodes
-            System.out.println("Waiting for another node to get in contact");
-            node.handleIncomingMessages(12 * 1000);
+            System.out.println("Waiting for another node to get in contact...");
+            node.handleIncomingMessages(12 * 1000); // Wait for traffic
 
-            // Let's start with a test of reading key/value pairs stored on the network.
-            // This should print out a poem.
-            System.out.println("Getting the poem...");
-            for (int i = 0; i < 7; ++i) {
+            // ========== TEST 1: Read (R) + Response (S) ==========
+            System.out.println("🔍 Reading a known poem key (triggers R/S)");
+            String value = node.read("D:jabberwocky0");
+            System.out.println("Read result: " + value);
+            Thread.sleep(1000);
+
+            // ========== TEST 2: Write then Exists (E) + Response (F) ==========
+            System.out.println("📦 Writing a key for existence test");
+            node.write("D:test-exists", "tempvalue");
+            Thread.sleep(1000);
+            System.out.println("🔎 Checking if 'D:test-exists' exists (triggers E/F)");
+            boolean exists = node.exists("D:test-exists");
+            System.out.println("Exists result: " + exists);
+            Thread.sleep(1000);
+
+            // ========== TEST 3: Write then CAS (C) + Response (D) ==========
+            System.out.println("⚙️ Writing key for CAS test");
+            node.write("D:test-cas", "first");
+            Thread.sleep(1000);
+            System.out.println("🔁 Attempting CAS to update value (triggers C/D)");
+            boolean updated = node.CAS("D:test-cas", "first", "second");
+            System.out.println("CAS result: " + updated);
+            Thread.sleep(1000);
+
+            // ========== TEST 4: Relay (V) ==========
+            System.out.println("🌐 Setting up relay and sending read (triggers V)");
+            node.pushRelay("N:white"); // Use a real node name you've seen in Wireshark
+            String relayed = node.read("D:jabberwocky2");
+            System.out.println("Relayed read result: " + relayed);
+            node.popRelay();
+            Thread.sleep(1000);
+
+            // ========== Original Code (Optional) ==========
+            System.out.println("Getting the rest of the poem...");
+            for (int i = 1; i < 7; ++i) {
                 String key = "D:jabberwocky" + i;
-                String value = node.read(key);
-                if (value == null) {
-                    System.err.println("Can't find poem verse " + i);
-                    System.exit(2);
+                String verse = node.read(key);
+                if (verse != null) {
+                    System.out.println(verse);
                 } else {
-                    System.out.println(value);
+                    System.err.println("Missing verse: " + i);
                 }
             }
 
-            // Now let's test writing a key/value pair
-            System.out.println("Writing a marker so it's clear my code works");
-            {
-                String key = "D:" + emailAddress;
-                String value = "It works!";
-                boolean success = node.write(key, value);
+            System.out.println("Writing a final marker...");
+            String markerKey = "D:" + emailAddress;
+            node.write(markerKey, "It works!");
+            System.out.println("Marker read back: " + node.read(markerKey));
 
-                // Read it back to be sure
-                System.out.println(node.read(key));
-            }
-
-            // Finally we will let other nodes know where we are
-            // so that we can be contacted and can store data for others.
-            System.out.println("Letting other nodes know where we are");
+            System.out.println("Publishing address to the network...");
             node.write(nodeName, ipAddress + ":" + port);
 
-            System.out.println("Handling incoming connections");
-            node.handleIncomingMessages(0);
-
+            System.out.println("📡 Handling incoming messages...");
+            node.handleIncomingMessages(0); // Keep running
 
         } catch (Exception e) {
-            System.err.println("Exception during AzureLabTest");
+            System.err.println("❌ Exception during AzureLabTest");
             e.printStackTrace(System.err);
-            return;
         }
     }
 }
