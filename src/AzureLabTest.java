@@ -25,12 +25,12 @@ import java.util.Random;
 
 class AzureLabTest {
     public static void main (String [] args) {
-        String emailAddress = "Put your e-mail address here!";
+        String emailAddress = "zidan.ahmed.2@city.ac.uk";
         if (false && emailAddress.indexOf('@') == -1) {
             System.err.println("Please set your e-mail address!");
             System.exit(1);
         }
-        String ipAddress = "Put the IP address of Azure lab machine here!  It should start with 10";
+        String ipAddress = "10.216.34.203";
         if (false && ipAddress.indexOf('.') == -1) {
             System.err.println("Please set your ip address!");
             System.exit(1);
