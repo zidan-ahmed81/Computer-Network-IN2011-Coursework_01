@@ -14,9 +14,11 @@
 
 import java.net.*;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.*;
 import java.util.*;
+import java.util.concurrent.*;
 import java.security.MessageDigest;
+import java.nio.charset.StandardCharsets;
+
 
 interface NodeInterface {
 
@@ -91,13 +93,13 @@ public class Node implements NodeInterface {
     private byte[] nodeHash;
     private DatagramSocket socket;
 
-    // A simple key/value store for data pairs (for keys starting with "D:")
+    // Local key/value store for data keys (keys starting with "D:")
     private ConcurrentMap<String, String> dataStore = new ConcurrentHashMap<>();
 
     // A stack to maintain relay nodes
     private Deque<String> relayStack = new ConcurrentLinkedDeque<>();
 
-    // Add this field to your Node class (at the top)
+    // Store for address key/value pairs (keys starting with "N:")
     private ConcurrentMap<String, String> addressStore = new ConcurrentHashMap<>();
 
     // Set the node name and compute its hashID using HashID.computeHashID.
@@ -113,21 +115,20 @@ public class Node implements NodeInterface {
     public void openPort(int portNumber) throws Exception {
         socket = new DatagramSocket(portNumber);
         // Store your own address key/value pair (using your node name as key)
-        String address = InetAddress.getLocalHost().getHostAddress() + ":" + portNumber;
+        String localAddress = InetAddress.getLocalHost().getHostAddress() + ":" + portNumber;
         if (nodeName != null) {
-            addressStore.put(nodeName, address);
+            addressStore.put(nodeName, localAddress);
         }
         System.out.println("Opened UDP port " + portNumber);
     }
 
-
-    // This method listens for incoming UDP messages for a specified delay (in milliseconds).
-    // It parses each message and dispatches the handling based on the command.
+    // Listen for incoming UDP messages for a specified delay (in milliseconds).
+    // Parses each message and dispatches handling based on the command.
     @Override
     public void handleIncomingMessages(int delay) throws Exception {
         byte[] buffer = new byte[1024];
         DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-        // Set a timeout if delay > 0, otherwise block indefinitely.
+        // Set timeout if delay > 0, otherwise block indefinitely.
         if (delay > 0) {
             socket.setSoTimeout(delay);
         } else {
@@ -141,13 +142,13 @@ public class Node implements NodeInterface {
                 processMessage(message, packet.getAddress(), packet.getPort());
             }
         } catch (SocketTimeoutException ste) {
-            // No message received within the delay period; exit the method.
+            // Timeout reached – exit the method.
         }
     }
 
-    // Parse a received message and dispatch to the appropriate handler.
-    // We assume a simplified protocol format: "<TID> <command> <payload>"
-    private void processMessage(String message, InetAddress address, int port) {
+    // Parse an incoming message and dispatch to the appropriate handler.
+    // Assumes simplified protocol format: "<TID> <command> <payload>"
+    private void processMessage(String message, InetAddress senderAddress, int senderPort) {
         String[] parts = message.split(" ", 3);
         if (parts.length < 2) {
             System.out.println("Invalid message format");
@@ -158,13 +159,13 @@ public class Node implements NodeInterface {
         String payload = (parts.length >= 3) ? parts[2] : "";
 
         switch (command) {
-            case "G": // Name request: reply with our node name.
-                sendNameResponse(transactionId, address, port);
+            case "G": // Name request – reply with our node name.
+                sendNameResponse(transactionId, senderAddress, senderPort);
                 break;
-            case "R": // Read request: payload contains the key.
-                sendReadResponse(transactionId, payload, address, port);
+            case "R": // Read request – payload is the key.
+                sendReadResponse(transactionId, payload, senderAddress, senderPort);
                 break;
-            case "W": // Write request: payload contains key and value separated by a space.
+            case "W": // Write request – payload contains key and value (separated by a space).
                 String[] kv = payload.split(" ", 2);
                 if (kv.length == 2) {
                     boolean writeResult = false;
@@ -173,10 +174,10 @@ public class Node implements NodeInterface {
                     } catch (Exception e) {
                         System.err.println("Error in write: " + e.getMessage());
                     }
-                    sendWriteResponse(transactionId, writeResult, address, port);
+                    sendWriteResponse(transactionId, writeResult, senderAddress, senderPort);
                 }
                 break;
-            case "C": // Compare And Swap (CAS) request: payload has key, currentValue, newValue.
+            case "C": // Compare-And-Swap (CAS) request – payload: key, currentValue, newValue.
                 String[] partsCAS = payload.split(" ", 3);
                 if (partsCAS.length == 3) {
                     boolean casResult = false;
@@ -185,44 +186,40 @@ public class Node implements NodeInterface {
                     } catch (Exception e) {
                         System.err.println("Error in CAS: " + e.getMessage());
                     }
-                    sendCASResponse(transactionId, casResult, address, port);
+                    sendCASResponse(transactionId, casResult, senderAddress, senderPort);
                 }
                 break;
-            case "N": // Nearest Request
-                processNearestRequest(transactionId, payload, address, port);
+            case "N": // Nearest request – payload is a hex-encoded hash.
+                processNearestRequest(transactionId, payload, senderAddress, senderPort);
                 break;
-            case "E": // Key Existence Request
-                processKeyExistenceRequest(transactionId, payload, address, port);
+            case "E": // Key existence request – payload is the key.
+                processKeyExistenceRequest(transactionId, payload, senderAddress, senderPort);
                 break;
-            case "V": // Relay message
-                processRelayMessage(transactionId, payload, address, port);
+            case "V": // Relay message – payload: target node + inner message.
+                processRelayMessage(transactionId, payload, senderAddress, senderPort);
                 break;
-            case "I": // Information message
+            case "I": // Information message – just log it.
                 System.out.println("Received Information message: " + payload);
-                // No response required
                 break;
             default:
                 System.out.println("Unknown command: " + command);
         }
     }
 
+    // Process a nearest request by computing distances from the requested hash.
     private void processNearestRequest(String transactionId, String hexHash, InetAddress address, int port) {
         try {
             byte[] requestHash = hexStringToByteArray(hexHash);
-
-            // Create a list to hold address pairs with their computed distance
             List<AddressDistance> distances = new ArrayList<>();
+            // Compute distances for each stored address.
             for (Map.Entry<String, String> entry : addressStore.entrySet()) {
-                String nodeKey = entry.getKey();
-                byte[] nodeHash = HashID.computeHashID(nodeKey);
-                int distance = computeDistance(requestHash, nodeHash);
-                distances.add(new AddressDistance(nodeKey, entry.getValue(), distance));
+                String key = entry.getKey();
+                byte[] keyHash = HashID.computeHashID(key);
+                int distance = computeDistance(requestHash, keyHash);
+                distances.add(new AddressDistance(key, entry.getValue(), distance));
             }
-
-            // Sort the list by distance (lowest distance first)
-            distances.sort((a, b) -> Integer.compare(a.distance, b.distance));
-
-            // Build the response string with up to three address pairs
+            // Sort by distance (lowest first) and include up to three entries.
+            distances.sort(Comparator.comparingInt(a -> a.distance));
             StringBuilder responseBuilder = new StringBuilder(transactionId + " O");
             int count = 0;
             for (AddressDistance ad : distances) {
@@ -230,7 +227,6 @@ public class Node implements NodeInterface {
                 responseBuilder.append(" ").append(formatAddressPair(ad.nodeName, ad.address));
                 count++;
             }
-
             String response = responseBuilder.toString();
             sendResponse(response, address, port);
             System.out.println("Sent nearest response: " + response);
@@ -239,18 +235,98 @@ public class Node implements NodeInterface {
         }
     }
 
-    // Helper: Convert a hex string to a byte array.
-    private byte[] hexStringToByteArray(String s) {
-        int len = s.length();
-        byte[] data = new byte[len / 2];
-        for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)
-                    + Character.digit(s.charAt(i+1), 16));
+    // Process a key existence request.
+    private void processKeyExistenceRequest(String transactionId, String key, InetAddress address, int port) {
+        try {
+            boolean existsLocal = dataStore.containsKey(key);
+            // For this simple implementation, assume this node is among the nearest.
+            char responseChar = existsLocal ? 'Y' : 'N';
+            String response = transactionId + " F " + responseChar;
+            sendResponse(response, address, port);
+            System.out.println("Sent key existence response: " + response);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-        return data;
     }
 
-    // Helper: Compute distance between two hashIDs
+    // Process a relay message.
+    private void processRelayMessage(String transactionId, String payload, InetAddress address, int port) {
+        try {
+            String[] tokens = payload.split(" ", 2);
+            if (tokens.length < 2) {
+                System.out.println("Invalid relay message format");
+                return;
+            }
+            String targetNode = tokens[0];
+            String innerMessage = tokens[1];
+            // If the target node is us, process the inner message.
+            if (targetNode.equals(nodeName)) {
+                // In this example, only a name request is handled specially.
+                if (innerMessage.contains(" G")) {
+                    String relayResponse = transactionId + " H " + nodeName;
+                    sendResponse(relayResponse, address, port);
+                    System.out.println("Processed relay message (name request): " + relayResponse);
+                } else {
+                    String relayResponse = transactionId + " I Unimplemented relay inner command";
+                    sendResponse(relayResponse, address, port);
+                    System.out.println("Processed relay message (generic): " + relayResponse);
+                }
+            } else {
+                // For now, if not targeted at us, indicate that relay forwarding isn’t implemented.
+                String relayResponse = transactionId + " I Relay forwarding not implemented";
+                sendResponse(relayResponse, address, port);
+                System.out.println("Relay forwarding not implemented: " + relayResponse);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Send a name response message.
+    private void sendNameResponse(String transactionId, InetAddress address, int port) {
+        String response = transactionId + " H " + nodeName;
+        sendResponse(response, address, port);
+    }
+
+    // Send a read response message based on whether the key exists locally.
+    private void sendReadResponse(String transactionId, String key, InetAddress address, int port) {
+        String value = null;
+        try {
+            value = read(key);
+        } catch (Exception e) {
+            System.err.println("Error in read: " + e.getMessage());
+        }
+        String response = (value != null) ? (transactionId + " S Y " + value)
+                : (transactionId + " S N");
+        sendResponse(response, address, port);
+    }
+
+    // Send a write response message.
+    private void sendWriteResponse(String transactionId, boolean success, InetAddress address, int port) {
+        // 'A' indicates a new value was stored; 'X' indicates failure.
+        String response = transactionId + " X " + (success ? "A" : "X");
+        sendResponse(response, address, port);
+    }
+
+    // Send a CAS response message.
+    private void sendCASResponse(String transactionId, boolean success, InetAddress address, int port) {
+        String response = transactionId + " D " + (success ? "R" : "N");
+        sendResponse(response, address, port);
+    }
+
+    // Helper to send a UDP response.
+    private void sendResponse(String response, InetAddress address, int port) {
+        byte[] respBytes = response.getBytes(StandardCharsets.UTF_8);
+        DatagramPacket respPacket = new DatagramPacket(respBytes, respBytes.length, address, port);
+        try {
+            socket.send(respPacket);
+            System.out.println("Sent response: " + response);
+        } catch (Exception e) {
+            System.err.println("Error sending response: " + e.getMessage());
+        }
+    }
+
+    // Compute the "distance" between two hashIDs as defined in the RFC.
     private int computeDistance(byte[] hash1, byte[] hash2) {
         int matchingBits = 0;
         for (int i = 0; i < Math.min(hash1.length, hash2.length); i++) {
@@ -266,8 +342,18 @@ public class Node implements NodeInterface {
         return 256 - matchingBits;
     }
 
-    // Helper: Format an address pair according to the protocol.
-// For example: "0 N:test 0 127.0.0.1:20110"
+    // Convert a hex string to a byte array.
+    private byte[] hexStringToByteArray(String s) {
+        int len = s.length();
+        byte[] data = new byte[len / 2];
+        for (int i = 0; i < len; i += 2) {
+            data[i / 2] = (byte)((Character.digit(s.charAt(i), 16) << 4)
+                    + Character.digit(s.charAt(i+1), 16));
+        }
+        return data;
+    }
+
+    // Format an address pair as per the protocol (e.g., "0 N:test 0 127.0.0.1:20110").
     private String formatAddressPair(String nodeName, String address) {
         return "0 " + nodeName + " 0 " + address;
     }
@@ -285,138 +371,20 @@ public class Node implements NodeInterface {
         }
     }
 
-    // (Optional) Helper: Convert a byte array to a hex string.
-    private String byteArrayToHexString(byte[] bytes) {
-        StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) {
-            sb.append(String.format("%02x", b));
-        }
-        return sb.toString();
-    }
-
-    private void processKeyExistenceRequest(String transactionId, String key, InetAddress address, int port) {
-        try {
-            boolean existsLocal = dataStore.containsKey(key);
-            // For now, assume this node is among the three closest nodes.
-            boolean isNearest = true;
-
-            char responseChar;
-            if (existsLocal) {
-                responseChar = 'Y';  // Key exists
-            } else if (!existsLocal && isNearest) {
-                responseChar = 'N';  // Key doesn't exist, but node is one of the nearest
-            } else {
-                responseChar = '?';  // Not one of the nearest
-            }
-
-            String response = transactionId + " F " + responseChar;
-            sendResponse(response, address, port);
-            System.out.println("Sent key existence response: " + response);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void processRelayMessage(String transactionId, String payload, InetAddress address, int port) {
-        try {
-            // Split the payload into the target node and the inner message.
-            String[] tokens = payload.split(" ", 2);
-            if (tokens.length < 2) {
-                System.out.println("Invalid relay message format");
-                return;
-            }
-            String targetNode = tokens[0];
-            String innerMessage = tokens[1];
-
-            // For our simple test, if the target node is this node, process the inner message locally.
-            if (targetNode.equals(nodeName)) {
-                // For a name request, innerMessage should contain " G"
-                if (innerMessage.contains(" G")) {
-                    // Create a name response using the relay's transaction ID.
-                    String relayResponse = transactionId + " H " + nodeName;
-                    sendResponse(relayResponse, address, port);
-                    System.out.println("Processed relay message (name request): " + relayResponse);
-                } else {
-                    // For other inner messages, you can implement further handling.
-                    String relayResponse = transactionId + " I Unimplemented relay inner command";
-                    sendResponse(relayResponse, address, port);
-                    System.out.println("Processed relay message (generic): " + relayResponse);
-                }
-            } else {
-                // If the target node is not this node, for now we do not implement forwarding.
-                String relayResponse = transactionId + " I Relay forwarding not implemented";
-                sendResponse(relayResponse, address, port);
-                System.out.println("Relay forwarding not implemented: " + relayResponse);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-
-    // Send a name response message in reply to a name request.
-    private void sendNameResponse(String transactionId, InetAddress address, int port) {
-        String response = transactionId + " H " + nodeName;
-        sendResponse(response, address, port);
-    }
-
-    // Send a read response. If the key exists, respond with "Y" and the value; otherwise "N".
-    private void sendReadResponse(String transactionId, String key, InetAddress address, int port) {
-        String value = null;
-        try {
-            value = read(key);
-        } catch (Exception e) {
-            System.err.println("Error in read: " + e.getMessage());
-        }
-        String response;
-        if (value != null) {
-            response = transactionId + " S Y " + value;
-        } else {
-            response = transactionId + " S N";
-        }
-        sendResponse(response, address, port);
-    }
-
-    // Send a write response message. In this simplified version, we always return a success code.
-    private void sendWriteResponse(String transactionId, boolean success, InetAddress address, int port) {
-        // For simplicity, we return "A" for a new value or replacement.
-        String response = transactionId + " X " + (success ? "A" : "X");
-        sendResponse(response, address, port);
-    }
-
-    // Send a CAS response message. Return "R" if successful, "N" otherwise.
-    private void sendCASResponse(String transactionId, boolean success, InetAddress address, int port) {
-        String response = transactionId + " D " + (success ? "R" : "N");
-        sendResponse(response, address, port);
-    }
-
-    // Helper method to send a UDP response.
-    private void sendResponse(String response, InetAddress address, int port) {
-        byte[] respBytes = response.getBytes(StandardCharsets.UTF_8);
-        DatagramPacket respPacket = new DatagramPacket(respBytes, respBytes.length, address, port);
-        try {
-            socket.send(respPacket);
-            System.out.println("Sent response: " + response);
-        } catch (Exception e) {
-            System.err.println("Error sending response: " + e.getMessage());
-        }
-    }
-
     // Check if a node is active.
-    // In this simple implementation, we return true if the provided name matches our node.
     @Override
     public boolean isActive(String nodeName) throws Exception {
         return this.nodeName != null && this.nodeName.equals(nodeName);
     }
 
-    // Add a node name to the relay stack.
+    // Push a node name onto the relay stack.
     @Override
     public void pushRelay(String nodeName) throws Exception {
         relayStack.push(nodeName);
         System.out.println("Pushed relay: " + nodeName);
     }
 
-    // Remove the top node name from the relay stack.
+    // Pop a node name from the relay stack.
     @Override
     public void popRelay() throws Exception {
         if (!relayStack.isEmpty()) {
@@ -425,19 +393,20 @@ public class Node implements NodeInterface {
         }
     }
 
-    // Check if a given key exists in the data store.
+    // Check for the existence of a key in the data store.
     @Override
     public boolean exists(String key) throws Exception {
         return dataStore.containsKey(key);
     }
 
-    // Read the value associated with a key.
+    // Synchronously read the value for a given key.
+    // In this implementation, we simply return the local value (populated via incoming UDP write messages).
     @Override
     public String read(String key) throws Exception {
         return dataStore.get(key);
     }
 
-    // Write a key/value pair into the data store.
+    // Write a key/value pair into the local data store.
     @Override
     public boolean write(String key, String value) throws Exception {
         dataStore.put(key, value);
