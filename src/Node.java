@@ -290,12 +290,7 @@ public class Node implements NodeInterface {
 
     // Send a read response message based on whether the key exists locally.
     private void sendReadResponse(String transactionId, String key, InetAddress address, int port) {
-        String value = null;
-        try {
-            value = read(key);
-        } catch (Exception e) {
-            System.err.println("Error in read: " + e.getMessage());
-        }
+        String value = localRead(key);
         String response = (value != null) ? (transactionId + " S Y " + value)
                 : (transactionId + " S N");
         sendResponse(response, address, port);
@@ -399,12 +394,65 @@ public class Node implements NodeInterface {
         return dataStore.containsKey(key);
     }
 
+    private String generateTransactionID() {
+        Random random = new Random();
+        int r = random.nextInt(0x10000);
+        return String.format("%04x", r);
+    }
+
+
     // Synchronously read the value for a given key.
     // In this implementation, we simply return the local value (populated via incoming UDP write messages).
     @Override
     public String read(String key) throws Exception {
+        // 1. Check local store
+        if (dataStore.containsKey(key)) {
+            return dataStore.get(key);
+        }
+
+        // 2. If not found, generate a transaction ID and build an R request message.
+        String tid = generateTransactionID();
+        String message = tid + " R 0 " + key + " ";
+
+        // 3. Send the request to all known nodes.
+        for (Map.Entry<String, String> entry : addressStore.entrySet()) {
+            String[] parts = entry.getValue().split(":");
+            InetAddress addr = InetAddress.getByName(parts[0]);
+            int port = Integer.parseInt(parts[1]);
+            DatagramPacket packet = new DatagramPacket(message.getBytes(StandardCharsets.UTF_8), message.length(), addr, port);
+            socket.send(packet);
+        }
+
+        // 4. Wait for an S response that matches tid, with a timeout.
+        long startTime = System.currentTimeMillis();
+        int timeout = 5000;
+        byte[] buffer = new byte[1024];
+        DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
+        while (System.currentTimeMillis() - startTime < timeout) {
+            try {
+                int remaining = timeout - (int)(System.currentTimeMillis() - startTime);
+                socket.setSoTimeout(remaining);
+                socket.receive(responsePacket);
+                String response = new String(responsePacket.getData(), 0, responsePacket.getLength(), StandardCharsets.UTF_8);
+                String[] tokens = response.split(" ", 4);
+                if (tokens.length >= 4 && tokens[0].equals(tid) && tokens[1].equals("S") && tokens[2].equals("Y")) {
+                    // Cache and return value
+                    dataStore.put(key, tokens[3]);
+                    return tokens[3].trim();
+                }
+            } catch (SocketTimeoutException ste) {
+                break;
+            }
+        }
+
+        return null;
+    }
+
+
+    private String localRead(String key) {
         return dataStore.get(key);
     }
+
 
     // Write a key/value pair into the local data store.
     @Override
