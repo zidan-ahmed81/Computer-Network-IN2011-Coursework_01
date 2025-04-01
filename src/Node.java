@@ -193,6 +193,9 @@ public class Node implements NodeInterface {
             case "I": // Information message – log it.
                 System.out.println("Received Information message: " + payload);
                 break;
+            case "S":
+                System.out.println("Received an unexpected S response: " + payload);
+                break;
             default:
                 System.out.println("Unknown command: " + command);
         }
