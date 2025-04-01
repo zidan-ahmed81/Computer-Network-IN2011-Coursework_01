@@ -21,9 +21,62 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Random;
 
 class AzureLabTest {
+
+    static class DummyResponder implements Runnable {
+        private int port;
+        private Map<String, String> poemVerses;
+
+        public DummyResponder(int port) {
+            this.port = port;
+            poemVerses = new HashMap<>();
+            // Populate dummy poem verses.
+            poemVerses.put("D:jabberwocky0", "’Twas brillig, and the slithy toves");
+            poemVerses.put("D:jabberwocky1", "Did gyre and gimble in the wabe;");
+            poemVerses.put("D:jabberwocky2", "All mimsy were the borogoves,");
+            poemVerses.put("D:jabberwocky3", "And the mome raths outgrabe.");
+            poemVerses.put("D:jabberwocky4", "Beware the Jabberwock, my son!");
+            poemVerses.put("D:jabberwocky5", "The jaws that bite, the claws that catch!");
+            poemVerses.put("D:jabberwocky6", "Beware the Jubjub bird, and shun");
+        }
+
+        @Override
+        public void run() {
+            try (DatagramSocket ds = new DatagramSocket(port)) {
+                byte[] buffer = new byte[1024];
+                System.out.println("DummyResponder listening on port " + port);
+                while (true) {
+                    DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                    ds.receive(packet);
+                    String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
+                    // Expect message format: "<TID> R <key> "
+                    String[] parts = message.split(" ", 3);
+                    if (parts.length < 3) continue;
+                    String tid = parts[0];
+                    String command = parts[1];
+                    String key = parts[2].trim();
+                    if ("R".equals(command) && poemVerses.containsKey(key)) {
+                        String verse = poemVerses.get(key);
+                        // Response: "<TID> S Y <verse>"
+                        String response = tid + " S Y " + verse;
+                        byte[] respBytes = response.getBytes(StandardCharsets.UTF_8);
+                        DatagramPacket respPacket = new DatagramPacket(respBytes, respBytes.length,
+                                packet.getAddress(), packet.getPort());
+                        ds.send(respPacket);
+                        System.out.println("DummyResponder sent: " + response);
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("DummyResponder exception: " + e.getMessage());
+            }
+        }
+    }
+
+
     public static void main (String [] args) {
         String emailAddress = "zidan.ahmed.2@city.ac.uk";
         if (false && emailAddress.indexOf('@') == -1) {
