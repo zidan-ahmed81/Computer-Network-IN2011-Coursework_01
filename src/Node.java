@@ -89,18 +89,18 @@ interface NodeInterface {
 
 // Complete this!
 public class Node implements NodeInterface {
-    private String nodeName;
-    private byte[] nodeHash;
-    private DatagramSocket socket;
-
     // Local key/value store for data keys (keys starting with "D:")
     private ConcurrentMap<String, String> dataStore = new ConcurrentHashMap<>();
 
-    // A stack to maintain relay nodes
+    // A stack to maintain relay nodes (if non-empty, all outgoing requests will be relayed)
     private Deque<String> relayStack = new ConcurrentLinkedDeque<>();
 
     // Store for address key/value pairs (keys starting with "N:")
     private ConcurrentMap<String, String> addressStore = new ConcurrentHashMap<>();
+
+    private String nodeName;
+    private byte[] nodeHash;
+    DatagramSocket socket;
 
     // Set the node name and compute its hashID using HashID.computeHashID.
     @Override
@@ -114,7 +114,7 @@ public class Node implements NodeInterface {
     @Override
     public void openPort(int portNumber) throws Exception {
         socket = new DatagramSocket(portNumber);
-        // Store your own address key/value pair (using your node name as key)
+        // Store your own address key/value pair using your node name as key.
         String localAddress = InetAddress.getLocalHost().getHostAddress() + ":" + portNumber;
         if (nodeName != null) {
             addressStore.put(nodeName, localAddress);
@@ -123,17 +123,13 @@ public class Node implements NodeInterface {
     }
 
     // Listen for incoming UDP messages for a specified delay (in milliseconds).
-    // Parses each message and dispatches handling based on the command.
     @Override
     public void handleIncomingMessages(int delay) throws Exception {
         byte[] buffer = new byte[1024];
         DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
         // Set timeout if delay > 0, otherwise block indefinitely.
-        if (delay > 0) {
-            socket.setSoTimeout(delay);
-        } else {
-            socket.setSoTimeout(0);
-        }
+
+        socket.setSoTimeout(delay > 0 ? delay : 0);
         try {
             while (true) {
                 socket.receive(packet);
@@ -146,8 +142,7 @@ public class Node implements NodeInterface {
         }
     }
 
-    // Parse an incoming message and dispatch to the appropriate handler.
-    // Assumes simplified protocol format: "<TID> <command> <payload>"
+    // Process incoming messages based on the command.
     private void processMessage(String message, InetAddress senderAddress, int senderPort) {
         String[] parts = message.split(" ", 3);
         if (parts.length < 2) {
@@ -156,7 +151,7 @@ public class Node implements NodeInterface {
         }
         String transactionId = parts[0];
         String command = parts[1];
-        String payload = (parts.length >= 3) ? parts[2] : "";
+        String payload = parts.length >= 3 ? parts[2] : "";
 
         switch (command) {
             case "G": // Name request – reply with our node name.
@@ -165,7 +160,7 @@ public class Node implements NodeInterface {
             case "R": // Read request – payload is the key.
                 sendReadResponse(transactionId, payload, senderAddress, senderPort);
                 break;
-            case "W": // Write request – payload contains key and value (separated by a space).
+            case "W": // Write request – payload contains key and value.
                 String[] kv = payload.split(" ", 2);
                 if (kv.length == 2) {
                     boolean writeResult = false;
@@ -177,7 +172,7 @@ public class Node implements NodeInterface {
                     sendWriteResponse(transactionId, writeResult, senderAddress, senderPort);
                 }
                 break;
-            case "C": // Compare-And-Swap (CAS) request – payload: key, currentValue, newValue.
+            case "C": // Compare-And-Swap request – payload: key, currentValue, newValue.
                 String[] partsCAS = payload.split(" ", 3);
                 if (partsCAS.length == 3) {
                     boolean casResult = false;
@@ -198,87 +193,11 @@ public class Node implements NodeInterface {
             case "V": // Relay message – payload: target node + inner message.
                 processRelayMessage(transactionId, payload, senderAddress, senderPort);
                 break;
-            case "I": // Information message – just log it.
+            case "I": // Information message – log it.
                 System.out.println("Received Information message: " + payload);
                 break;
             default:
                 System.out.println("Unknown command: " + command);
-        }
-    }
-
-    // Process a nearest request by computing distances from the requested hash.
-    private void processNearestRequest(String transactionId, String hexHash, InetAddress address, int port) {
-        try {
-            byte[] requestHash = hexStringToByteArray(hexHash);
-            List<AddressDistance> distances = new ArrayList<>();
-            // Compute distances for each stored address.
-            for (Map.Entry<String, String> entry : addressStore.entrySet()) {
-                String key = entry.getKey();
-                byte[] keyHash = HashID.computeHashID(key);
-                int distance = computeDistance(requestHash, keyHash);
-                distances.add(new AddressDistance(key, entry.getValue(), distance));
-            }
-            // Sort by distance (lowest first) and include up to three entries.
-            distances.sort(Comparator.comparingInt(a -> a.distance));
-            StringBuilder responseBuilder = new StringBuilder(transactionId + " O");
-            int count = 0;
-            for (AddressDistance ad : distances) {
-                if (count >= 3) break;
-                responseBuilder.append(" ").append(formatAddressPair(ad.nodeName, ad.address));
-                count++;
-            }
-            String response = responseBuilder.toString();
-            sendResponse(response, address, port);
-            System.out.println("Sent nearest response: " + response);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    // Process a key existence request.
-    private void processKeyExistenceRequest(String transactionId, String key, InetAddress address, int port) {
-        try {
-            boolean existsLocal = dataStore.containsKey(key);
-            // For this simple implementation, assume this node is among the nearest.
-            char responseChar = existsLocal ? 'Y' : 'N';
-            String response = transactionId + " F " + responseChar;
-            sendResponse(response, address, port);
-            System.out.println("Sent key existence response: " + response);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    // Process a relay message.
-    private void processRelayMessage(String transactionId, String payload, InetAddress address, int port) {
-        try {
-            String[] tokens = payload.split(" ", 2);
-            if (tokens.length < 2) {
-                System.out.println("Invalid relay message format");
-                return;
-            }
-            String targetNode = tokens[0];
-            String innerMessage = tokens[1];
-            // If the target node is us, process the inner message.
-            if (targetNode.equals(nodeName)) {
-                // In this example, only a name request is handled specially.
-                if (innerMessage.contains(" G")) {
-                    String relayResponse = transactionId + " H " + nodeName;
-                    sendResponse(relayResponse, address, port);
-                    System.out.println("Processed relay message (name request): " + relayResponse);
-                } else {
-                    String relayResponse = transactionId + " I Unimplemented relay inner command";
-                    sendResponse(relayResponse, address, port);
-                    System.out.println("Processed relay message (generic): " + relayResponse);
-                }
-            } else {
-                // For now, if not targeted at us, indicate that relay forwarding isn’t implemented.
-                String relayResponse = transactionId + " I Relay forwarding not implemented";
-                sendResponse(relayResponse, address, port);
-                System.out.println("Relay forwarding not implemented: " + relayResponse);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
         }
     }
 
@@ -288,17 +207,15 @@ public class Node implements NodeInterface {
         sendResponse(response, address, port);
     }
 
-    // Send a read response message based on whether the key exists locally.
+    // Send a read response message based on local data store.
     private void sendReadResponse(String transactionId, String key, InetAddress address, int port) {
         String value = localRead(key);
-        String response = (value != null) ? (transactionId + " S Y " + value)
-                : (transactionId + " S N");
+        String response = (value != null) ? (transactionId + " S Y " + value) : (transactionId + " S N");
         sendResponse(response, address, port);
     }
 
     // Send a write response message.
     private void sendWriteResponse(String transactionId, boolean success, InetAddress address, int port) {
-        // 'A' indicates a new value was stored; 'X' indicates failure.
         String response = transactionId + " X " + (success ? "A" : "X");
         sendResponse(response, address, port);
     }
@@ -309,60 +226,119 @@ public class Node implements NodeInterface {
         sendResponse(response, address, port);
     }
 
-    // Helper to send a UDP response.
-    private void sendResponse(String response, InetAddress address, int port) {
-        byte[] respBytes = response.getBytes(StandardCharsets.UTF_8);
-        DatagramPacket respPacket = new DatagramPacket(respBytes, respBytes.length, address, port);
+    // Process a nearest request by computing distances from the given hex-encoded hash.
+    private void processNearestRequest(String transactionId, String hexHash, InetAddress address, int port) {
         try {
-            socket.send(respPacket);
-            System.out.println("Sent response: " + response);
+            byte[] requestHash = hexStringToByteArray(hexHash);
+            List<AddressDistance> distances = new ArrayList<>();
+            for (Map.Entry<String, String> entry : addressStore.entrySet()) {
+                String key = entry.getKey();
+                byte[] keyHash = HashID.computeHashID(key);
+                int distance = computeDistance(requestHash, keyHash);
+                distances.add(new AddressDistance(key, entry.getValue(), distance));
+            }
+            distances.sort(Comparator.comparingInt(a -> a.distance));
+            StringBuilder responseBuilder = new StringBuilder(transactionId + " O");
+            int count = 0;
+            for (AddressDistance ad : distances) {
+                if (count >= 3) break;
+                responseBuilder.append(" ").append(formatAddressPair(ad.nodeName, ad.address));
+                count++;
+            }
+            sendResponse(responseBuilder.toString(), address, port);
+            System.out.println("Sent nearest response: " + responseBuilder.toString());
         } catch (Exception e) {
-            System.err.println("Error sending response: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
-    // Compute the "distance" between two hashIDs as defined in the RFC.
-    private int computeDistance(byte[] hash1, byte[] hash2) {
-        int matchingBits = 0;
-        for (int i = 0; i < Math.min(hash1.length, hash2.length); i++) {
-            int xor = hash1[i] ^ hash2[i];
-            for (int j = 7; j >= 0; j--) {
-                if ((xor & (1 << j)) == 0) {
-                    matchingBits++;
+    // Process a key existence request.
+    private void processKeyExistenceRequest(String transactionId, String key, InetAddress address, int port) {
+        try {
+            boolean existsLocal = dataStore.containsKey(key);
+            char responseChar = existsLocal ? 'Y' : 'N';
+            String response = transactionId + " F " + responseChar;
+            sendResponse(response, address, port);
+            System.out.println("Sent key existence response: " + response);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Process a relay message. If the target node is not us, try to forward it.
+    private void processRelayMessage(String transactionId, String payload, InetAddress address, int port) {
+        try {
+            String[] tokens = payload.split(" ", 2);
+            if (tokens.length < 2) {
+                System.out.println("Invalid relay message format");
+                return;
+            }
+            String targetNode = tokens[0];
+            String innerMessage = tokens[1];
+            // If this node is the target, process the inner message.
+            if (targetNode.equals(nodeName)) {
+                // For example, if the inner message is a name request.
+                if (innerMessage.contains(" G")) {
+                    String relayResponse = transactionId + " H " + nodeName;
+                    sendResponse(relayResponse, address, port);
+                    System.out.println("Processed relay message (name request): " + relayResponse);
                 } else {
-                    return 256 - matchingBits;
+                    String relayResponse = transactionId + " I Unimplemented relay inner command";
+                    sendResponse(relayResponse, address, port);
+                    System.out.println("Processed relay message (generic): " + relayResponse);
+                }
+            } else {
+                // Attempt to forward the relay message if we have an address for the target.
+                String targetAddressStr = addressStore.get(targetNode);
+                if (targetAddressStr != null) {
+                    String[] parts = targetAddressStr.split(":");
+                    InetAddress targetAddr = InetAddress.getByName(parts[0]);
+                    int targetPort = Integer.parseInt(parts[1]);
+                    // Forward the inner message.
+                    System.out.println("Forwarding relay message to " + targetNode);
+                    String response = forwardRelay(innerMessage, targetAddr, targetPort);
+                    // Relay back the response with the original transaction id.
+                    String relayResponse = transactionId + " " + response;
+                    sendResponse(relayResponse, address, port);
+                } else {
+                    String relayResponse = transactionId + " I Relay target address not found";
+                    sendResponse(relayResponse, address, port);
+                    System.out.println("Relay forwarding failed: target " + targetNode + " not found");
                 }
             }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-        return 256 - matchingBits;
     }
 
-    // Convert a hex string to a byte array.
-    private byte[] hexStringToByteArray(String s) {
-        int len = s.length();
-        byte[] data = new byte[len / 2];
-        for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte)((Character.digit(s.charAt(i), 16) << 4)
-                    + Character.digit(s.charAt(i+1), 16));
-        }
-        return data;
-    }
-
-    // Format an address pair as per the protocol (e.g., "0 N:test 0 127.0.0.1:20110").
-    private String formatAddressPair(String nodeName, String address) {
-        return "0 " + nodeName + " 0 " + address;
-    }
-
-    // Helper class to store address distances.
-    private static class AddressDistance {
-        String nodeName;
-        String address;
-        int distance;
-
-        AddressDistance(String nodeName, String address, int distance) {
-            this.nodeName = nodeName;
-            this.address = address;
-            this.distance = distance;
+    // Helper method to forward a message and wait for a response.
+// This is a simple synchronous implementation.
+    private String forwardRelay(String message, InetAddress targetAddr, int targetPort) {
+        try {
+            String tid = generateTransactionID();
+            String request = tid + " " + message;
+            sendDirect(request, targetAddr, targetPort);
+            long startTime = System.currentTimeMillis();
+            int timeout = 5000;
+            byte[] buffer = new byte[1024];
+            DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
+            while (System.currentTimeMillis() - startTime < timeout) {
+                try {
+                    int remaining = timeout - (int) (System.currentTimeMillis() - startTime);
+                    socket.setSoTimeout(remaining);
+                    socket.receive(responsePacket);
+                    String response = new String(responsePacket.getData(), 0, responsePacket.getLength(), StandardCharsets.UTF_8);
+                    String[] tokens = response.split(" ", 2);
+                    if (tokens.length >= 2 && tokens[0].equals(tid)) {
+                        return tokens[1];
+                    }
+                } catch (SocketTimeoutException ste) {
+                    break;
+                }
+            }
+            return "I Relay response timeout";
+        } catch (Exception e) {
+            return "I Relay error: " + e.getMessage();
         }
     }
 
@@ -400,59 +376,56 @@ public class Node implements NodeInterface {
         return String.format("%04x", r);
     }
 
-
     // Synchronously read the value for a given key.
-    // In this implementation, we simply return the local value (populated via incoming UDP write messages).
     @Override
     public String read(String key) throws Exception {
-        // 1. Check local store
+        // First, check if the value is locally available.
         if (dataStore.containsKey(key)) {
             return dataStore.get(key);
         }
-
-        // 2. If not found, generate a transaction ID and build an R request message.
         String tid = generateTransactionID();
-        String message = tid + " R 0 " + key + " ";
-
-        // 3. Send the request to all known nodes.
-        for (Map.Entry<String, String> entry : addressStore.entrySet()) {
-            String[] parts = entry.getValue().split(":");
+        String message = tid + " R " + key + " ";
+        // Retrieve all known address pairs.
+        List<InetSocketAddress> targets = new ArrayList<>();
+        for (String addrStr : addressStore.values()) {
+            String[] parts = addrStr.split(":");
             InetAddress addr = InetAddress.getByName(parts[0]);
             int port = Integer.parseInt(parts[1]);
-            DatagramPacket packet = new DatagramPacket(message.getBytes(StandardCharsets.UTF_8), message.length(), addr, port);
-            socket.send(packet);
+            targets.add(new InetSocketAddress(addr, port));
         }
-
-        // 4. Wait for an S response that matches tid, with a timeout.
-        long startTime = System.currentTimeMillis();
-        int timeout = 5000;
-        byte[] buffer = new byte[1024];
-        DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
-        while (System.currentTimeMillis() - startTime < timeout) {
-            try {
-                int remaining = timeout - (int)(System.currentTimeMillis() - startTime);
-                socket.setSoTimeout(remaining);
-                socket.receive(responsePacket);
-                String response = new String(responsePacket.getData(), 0, responsePacket.getLength(), StandardCharsets.UTF_8);
-                String[] tokens = response.split(" ", 4);
-                if (tokens.length >= 4 && tokens[0].equals(tid) && tokens[1].equals("S") && tokens[2].equals("Y")) {
-                    // Cache and return value
-                    dataStore.put(key, tokens[3]);
-                    return tokens[3].trim();
-                }
-            } catch (SocketTimeoutException ste) {
-                break;
+        // Attempt up to 3 times to get a response.
+        int attempts = 0;
+        while (attempts < 3) {
+            for (InetSocketAddress target : targets) {
+                sendRequest(message, target.getAddress(), target.getPort());
             }
+            long startTime = System.currentTimeMillis();
+            int timeout = 5000;
+            byte[] buffer = new byte[1024];
+            DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
+            while (System.currentTimeMillis() - startTime < timeout) {
+                try {
+                    int remaining = timeout - (int) (System.currentTimeMillis() - startTime);
+                    socket.setSoTimeout(remaining);
+                    socket.receive(responsePacket);
+                    String response = new String(responsePacket.getData(), 0, responsePacket.getLength(), StandardCharsets.UTF_8);
+                    String[] tokens = response.split(" ", 4);
+                    if (tokens.length >= 4 && tokens[0].equals(tid) && tokens[1].equals("S") && tokens[2].equals("Y")) {
+                        dataStore.put(key, tokens[3].trim());
+                        return tokens[3].trim();
+                    }
+                } catch (SocketTimeoutException ste) {
+                    break;
+                }
+            }
+            attempts++;
         }
-
         return null;
     }
-
 
     private String localRead(String key) {
         return dataStore.get(key);
     }
-
 
     // Write a key/value pair into the local data store.
     @Override
@@ -468,5 +441,82 @@ public class Node implements NodeInterface {
         boolean success = dataStore.replace(key, currentValue, newValue);
         System.out.println("CAS on key: " + key + " from '" + currentValue + "' to '" + newValue + "' " + (success ? "succeeded" : "failed"));
         return success;
+    }
+
+    // Helper method to send a UDP response directly.
+    private void sendResponse(String response, InetAddress address, int port) {
+        byte[] respBytes = response.getBytes(StandardCharsets.UTF_8);
+        DatagramPacket respPacket = new DatagramPacket(respBytes, respBytes.length, address, port);
+        try {
+            socket.send(respPacket);
+            System.out.println("Sent response: " + response);
+        } catch (Exception e) {
+            System.err.println("Error sending response: " + e.getMessage());
+        }
+    }
+
+    // Helper method to send a request taking into account the relay stack.
+// If relayStack is non-empty, the outgoing message is wrapped in a relay message.
+    private void sendRequest(String message, InetAddress address, int port) throws Exception {
+        if (!relayStack.isEmpty()) {
+            String relayTarget = relayStack.peek();
+            // Wrap the original message (keeping its transaction ID intact)
+            String tid = message.substring(0, 4); // assuming tid is 4 hex digits
+            message = tid + " V " + relayTarget + " " + message.substring(5);
+        }
+        sendDirect(message, address, port);
+    }
+
+    // Sends a message directly (without relay wrapping).
+    private void sendDirect(String message, InetAddress address, int port) throws Exception {
+        byte[] bytes = message.getBytes(StandardCharsets.UTF_8);
+        DatagramPacket packet = new DatagramPacket(bytes, bytes.length, address, port);
+        socket.send(packet);
+        System.out.println("Sent packet: " + message + " to " + address.getHostAddress() + ":" + port);
+    }
+
+    // Compute the "distance" between two hashIDs as defined in the RFC.
+    private int computeDistance(byte[] hash1, byte[] hash2) {
+        int matchingBits = 0;
+        for (int i = 0; i < Math.min(hash1.length, hash2.length); i++) {
+            int xor = hash1[i] ^ hash2[i];
+            for (int j = 7; j >= 0; j--) {
+                if ((xor & (1 << j)) == 0) {
+                    matchingBits++;
+                } else {
+                    return 256 - matchingBits;
+                }
+            }
+        }
+        return 256 - matchingBits;
+    }
+
+    // Convert a hex string to a byte array.
+    private byte[] hexStringToByteArray(String s) {
+        int len = s.length();
+        byte[] data = new byte[len / 2];
+        for (int i = 0; i < len; i += 2) {
+            data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)
+                    + Character.digit(s.charAt(i + 1), 16));
+        }
+        return data;
+    }
+
+    // Format an address pair as per protocol (e.g., "0 N:test 0 127.0.0.1:20110").
+    private String formatAddressPair(String nodeName, String address) {
+        return "0 " + nodeName + " 0 " + address;
+    }
+
+    // Helper class for storing address distances.
+    private static class AddressDistance {
+        String nodeName;
+        String address;
+        int distance;
+
+        AddressDistance(String nodeName, String address, int distance) {
+            this.nodeName = nodeName;
+            this.address = address;
+            this.distance = distance;
+        }
     }
 }
