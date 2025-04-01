@@ -388,8 +388,14 @@ public class Node implements NodeInterface {
         // Debug: show current addressStore content.
         System.out.println("Current addressStore: " + addressStore);
 
+        // Build target list while excluding own node.
         List<InetSocketAddress> targets = new ArrayList<>();
-        for (String addrStr : addressStore.values()) {
+        for (Map.Entry<String, String> entry : addressStore.entrySet()) {
+            if (entry.getKey().equals(this.nodeName)) {
+                // Skip our own node.
+                continue;
+            }
+            String addrStr = entry.getValue();
             String[] parts = addrStr.split(":");
             InetAddress addr = InetAddress.getByName(parts[0]);
             int port = Integer.parseInt(parts[1]);
@@ -424,6 +430,7 @@ public class Node implements NodeInterface {
         }
         return null;
     }
+
 
     private String localRead(String key) {
         return dataStore.get(key);

@@ -58,33 +58,33 @@ class AzureLabTest {
     }
 
     public static void main(String[] args) {
-        // Replace with your actual email and lab IP address if needed.
+        // Use your VM's IP address.
         String emailAddress = "zidan.ahmed.2@city.ac.uk";
-        // Choose either 10.200.51.18 or 10.200.51.19.
+        // Choose either 10.200.51.18 or 10.200.51.19; here we use 10.200.51.19.
         String ipAddress = "10.200.51.19";
 
         try {
-            // Start DummyResponder on port 30110 for local testing.
+            // Start DummyResponder on port 30110 for testing.
             int dummyPort = 30110;
             Thread dummyThread = new Thread(new DummyResponder(dummyPort));
-            dummyThread.setDaemon(true); // Ensure it exits when the main thread ends.
+            dummyThread.setDaemon(true); // Ensures it exits when main thread ends.
             dummyThread.start();
 
             // Create and initialize a Node instance.
             Node node = new Node();
             String nodeName = "N:" + emailAddress;
             node.setNodeName(nodeName);
-            int port = 20114; // Use port 20114 as per your updated requirement.
+            int port = 20114; // Using port 20114 as per your choice.
             node.openPort(port);
 
             // Add the dummy node to the node's addressStore using reflection.
-            // This ensures that R requests are sent to the dummy responder.
+            // In the VM environment, use your VM's IP address instead of 127.0.0.1.
             java.lang.reflect.Field field = Node.class.getDeclaredField("addressStore");
             field.setAccessible(true);
             @SuppressWarnings("unchecked")
             Map<String, String> addressStore = (Map<String, String>) field.get(node);
-            addressStore.put("N:dummy", "127.0.0.1:" + dummyPort);
-            System.out.println("Added dummy node address: N:dummy -> 127.0.0.1:" + dummyPort);
+            addressStore.put("N:dummy", ipAddress + ":" + dummyPort);
+            System.out.println("Added dummy node address: N:dummy -> " + ipAddress + ":" + dummyPort);
 
             // Wait for bootstrapping (simulate waiting for other nodes).
             System.out.println("Waiting for bootstrapping...");
@@ -118,7 +118,7 @@ class AzureLabTest {
                 System.out.println("Marker read-back: " + node.read(key));
             }
 
-            // Announce your node's address so that other nodes can contact you.
+            // Announce your node's address so that other nodes can contact it.
             System.out.println("Letting other nodes know where we are");
             node.write(nodeName, ipAddress + ":" + port);
 
