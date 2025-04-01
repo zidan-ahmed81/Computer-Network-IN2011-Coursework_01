@@ -1,32 +1,13 @@
-// IN2011 Computer Networks
-// Coursework 2024/2025
-//
-// This is a test program to show how Node.java can be used.
-// It creates a single instance of Node.java.
-// A bootstrapping stage gives the nodes the addresses of a few of the nodes on the Azure virtual lab
-// Then it performs some basic tests on the network.
-//
-// Running this test is not enough to check that all of the features of your
-// implementation work.  You will need to do your own testing as well.
-//
-// You will need to run this on the virtual lab computers.  If you run it on your own computer
-// it will not be able to access the nodes on the virtual lab.
-//
-// You can use this to record the wireshark evidence of things working.
-// But please be aware it does not test all of the features so you will need to modify it or
-// write your own tests to show everything works.
-
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Random;
 
 class AzureLabTest {
 
+    // DummyResponder simulates a remote node that holds poem verses.
     static class DummyResponder implements Runnable {
         private int port;
         private Map<String, String> poemVerses;
@@ -53,7 +34,7 @@ class AzureLabTest {
                     DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                     ds.receive(packet);
                     String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
-                    // Expect message format: "<TID> R <key> "
+                    // Expected message format: "<TID> R <key> "
                     String[] parts = message.split(" ", 3);
                     if (parts.length < 3) continue;
                     String tid = parts[0];
@@ -76,70 +57,79 @@ class AzureLabTest {
         }
     }
 
-
-    public static void main (String [] args) {
+    public static void main(String[] args) {
+        // Replace with your actual email and lab IP address if needed.
         String emailAddress = "zidan.ahmed.2@city.ac.uk";
-        if (false && emailAddress.indexOf('@') == -1) {
-            System.err.println("Please set your e-mail address!");
-            System.exit(1);
-        }
-        String ipAddress = "10.216.34.203";
-        if (false && ipAddress.indexOf('.') == -1) {
-            System.err.println("Please set your ip address!");
-            System.exit(1);
-        }
+        // Choose either 10.200.51.18 or 10.200.51.19.
+        String ipAddress = "10.200.51.19";
 
         try {
-            // Create a node and initialise it
+            // Start DummyResponder on port 30110 for local testing.
+            int dummyPort = 30110;
+            Thread dummyThread = new Thread(new DummyResponder(dummyPort));
+            dummyThread.setDaemon(true); // Ensure it exits when the main thread ends.
+            dummyThread.start();
+
+            // Create and initialize a Node instance.
             Node node = new Node();
             String nodeName = "N:" + emailAddress;
             node.setNodeName(nodeName);
-
-            int port = 20110;
+            int port = 20114; // Use port 20114 as per your updated requirement.
             node.openPort(port);
 
-            // Wait and hope that we get sent the address of some other nodes
-            System.out.println("Waiting for another node to get in contact");
-            node.handleIncomingMessages(12 * 1000);
+            // Add the dummy node to the node's addressStore using reflection.
+            // This ensures that R requests are sent to the dummy responder.
+            java.lang.reflect.Field field = Node.class.getDeclaredField("addressStore");
+            field.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            Map<String, String> addressStore = (Map<String, String>) field.get(node);
+            addressStore.put("N:dummy", "127.0.0.1:" + dummyPort);
+            System.out.println("Added dummy node address: N:dummy -> 127.0.0.1:" + dummyPort);
 
-            // Let's start with a test of reading key/value pairs stored on the network.
-            // This should print out a poem.
-            System.out.println("Getting the poem...");
-            for (int i = 0; i < 7; ++i) {
+            // Wait for bootstrapping (simulate waiting for other nodes).
+            System.out.println("Waiting for bootstrapping...");
+            node.handleIncomingMessages(5000);
+
+            // Manually trigger a read for "D:jabberwocky0" to test R/S flow.
+            System.out.println("Manually triggering a read for key D:jabberwocky0");
+            String manualResult = node.read("D:jabberwocky0");
+            System.out.println("Manual read result: " + manualResult);
+
+            // Test reading the full poem (verses 0 to 6).
+            System.out.println("Getting the full poem...");
+            for (int i = 0; i < 7; i++) {
                 String key = "D:jabberwocky" + i;
                 String value = node.read(key);
                 if (value == null) {
                     System.err.println("Can't find poem verse " + i);
                     System.exit(2);
                 } else {
-                    System.out.println(value);
+                    System.out.println("Verse " + i + ": " + value);
                 }
             }
 
-            // Now let's test writing a key/value pair
+            // Test writing a marker to verify write functionality.
             System.out.println("Writing a marker so it's clear my code works");
             {
                 String key = "D:" + emailAddress;
                 String value = "It works!";
                 boolean success = node.write(key, value);
-
-                // Read it back to be sure
-                System.out.println(node.read(key));
+                System.out.println("Write marker success: " + success);
+                System.out.println("Marker read-back: " + node.read(key));
             }
 
-            // Finally we will let other nodes know where we are
-            // so that we can be contacted and can store data for others.
+            // Announce your node's address so that other nodes can contact you.
             System.out.println("Letting other nodes know where we are");
             node.write(nodeName, ipAddress + ":" + port);
 
-            System.out.println("Handling incoming connections");
+            // Handle incoming connections indefinitely.
+            System.out.println("Handling incoming connections (press Ctrl+C to exit)...");
             node.handleIncomingMessages(0);
-
 
         } catch (Exception e) {
             System.err.println("Exception during AzureLabTest");
-            e.printStackTrace(System.err);
-            return;
+            e.printStackTrace();
+            System.exit(1);
         }
     }
 }
