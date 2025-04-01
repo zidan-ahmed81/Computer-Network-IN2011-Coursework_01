@@ -127,8 +127,6 @@ public class Node implements NodeInterface {
     public void handleIncomingMessages(int delay) throws Exception {
         byte[] buffer = new byte[1024];
         DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-        // Set timeout if delay > 0, otherwise block indefinitely.
-
         socket.setSoTimeout(delay > 0 ? delay : 0);
         try {
             while (true) {
@@ -152,7 +150,6 @@ public class Node implements NodeInterface {
         String transactionId = parts[0];
         String command = parts[1];
         String payload = parts.length >= 3 ? parts[2] : "";
-
         switch (command) {
             case "G": // Name request – reply with our node name.
                 sendNameResponse(transactionId, senderAddress, senderPort);
@@ -277,7 +274,6 @@ public class Node implements NodeInterface {
             String innerMessage = tokens[1];
             // If this node is the target, process the inner message.
             if (targetNode.equals(nodeName)) {
-                // For example, if the inner message is a name request.
                 if (innerMessage.contains(" G")) {
                     String relayResponse = transactionId + " H " + nodeName;
                     sendResponse(relayResponse, address, port);
@@ -294,10 +290,8 @@ public class Node implements NodeInterface {
                     String[] parts = targetAddressStr.split(":");
                     InetAddress targetAddr = InetAddress.getByName(parts[0]);
                     int targetPort = Integer.parseInt(parts[1]);
-                    // Forward the inner message.
                     System.out.println("Forwarding relay message to " + targetNode);
                     String response = forwardRelay(innerMessage, targetAddr, targetPort);
-                    // Relay back the response with the original transaction id.
                     String relayResponse = transactionId + " " + response;
                     sendResponse(relayResponse, address, port);
                 } else {
@@ -312,7 +306,6 @@ public class Node implements NodeInterface {
     }
 
     // Helper method to forward a message and wait for a response.
-// This is a simple synchronous implementation.
     private String forwardRelay(String message, InetAddress targetAddr, int targetPort) {
         try {
             String tid = generateTransactionID();
@@ -324,7 +317,7 @@ public class Node implements NodeInterface {
             DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
             while (System.currentTimeMillis() - startTime < timeout) {
                 try {
-                    int remaining = timeout - (int) (System.currentTimeMillis() - startTime);
+                    int remaining = timeout - (int)(System.currentTimeMillis() - startTime);
                     socket.setSoTimeout(remaining);
                     socket.receive(responsePacket);
                     String response = new String(responsePacket.getData(), 0, responsePacket.getLength(), StandardCharsets.UTF_8);
@@ -379,13 +372,19 @@ public class Node implements NodeInterface {
     // Synchronously read the value for a given key.
     @Override
     public String read(String key) throws Exception {
-        // First, check if the value is locally available.
+        System.out.println("Initiating read for key: " + key);
+        // Check local cache first.
         if (dataStore.containsKey(key)) {
+            System.out.println("Key found in local cache.");
             return dataStore.get(key);
         }
         String tid = generateTransactionID();
         String message = tid + " R " + key + " ";
-        // Retrieve all known address pairs.
+        System.out.println("Sending R request: " + message);
+
+        // Debug: show current addressStore content.
+        System.out.println("Current addressStore: " + addressStore);
+
         List<InetSocketAddress> targets = new ArrayList<>();
         for (String addrStr : addressStore.values()) {
             String[] parts = addrStr.split(":");
@@ -393,7 +392,6 @@ public class Node implements NodeInterface {
             int port = Integer.parseInt(parts[1]);
             targets.add(new InetSocketAddress(addr, port));
         }
-        // Attempt up to 3 times to get a response.
         int attempts = 0;
         while (attempts < 3) {
             for (InetSocketAddress target : targets) {
@@ -405,10 +403,11 @@ public class Node implements NodeInterface {
             DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
             while (System.currentTimeMillis() - startTime < timeout) {
                 try {
-                    int remaining = timeout - (int) (System.currentTimeMillis() - startTime);
+                    int remaining = timeout - (int)(System.currentTimeMillis() - startTime);
                     socket.setSoTimeout(remaining);
                     socket.receive(responsePacket);
                     String response = new String(responsePacket.getData(), 0, responsePacket.getLength(), StandardCharsets.UTF_8);
+                    System.out.println("Received response: " + response);
                     String[] tokens = response.split(" ", 4);
                     if (tokens.length >= 4 && tokens[0].equals(tid) && tokens[1].equals("S") && tokens[2].equals("Y")) {
                         dataStore.put(key, tokens[3].trim());
@@ -456,15 +455,14 @@ public class Node implements NodeInterface {
     }
 
     // Helper method to send a request taking into account the relay stack.
-// If relayStack is non-empty, the outgoing message is wrapped in a relay message.
     private void sendRequest(String message, InetAddress address, int port) throws Exception {
         if (!relayStack.isEmpty()) {
             String relayTarget = relayStack.peek();
-            // Wrap the original message (keeping its transaction ID intact)
             String tid = message.substring(0, 4); // assuming tid is 4 hex digits
             message = tid + " V " + relayTarget + " " + message.substring(5);
         }
         sendDirect(message, address, port);
+        System.out.println("Sent packet: " + message + " to " + address.getHostAddress() + ":" + port);
     }
 
     // Sends a message directly (without relay wrapping).
@@ -496,8 +494,8 @@ public class Node implements NodeInterface {
         int len = s.length();
         byte[] data = new byte[len / 2];
         for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)
-                    + Character.digit(s.charAt(i + 1), 16));
+            data[i / 2] = (byte)((Character.digit(s.charAt(i), 16) << 4)
+                    + Character.digit(s.charAt(i+1), 16));
         }
         return data;
     }
@@ -512,7 +510,6 @@ public class Node implements NodeInterface {
         String nodeName;
         String address;
         int distance;
-
         AddressDistance(String nodeName, String address, int distance) {
             this.nodeName = nodeName;
             this.address = address;
