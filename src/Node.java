@@ -87,6 +87,7 @@ public class Node implements NodeInterface {
                     byte[] buffer = new byte[4096];
                     DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                     socket.receive(packet);
+                    System.out.println("Packet received from " + packet.getAddress() + ":" + packet.getPort());
                     processPacket(packet);
                 }
             } catch (SocketException se) {

@@ -14,8 +14,8 @@ public class AzureLabTest {
     // Helper method: send a UDP message and wait for a response
     private static String sendUDPMessage(String message, int port) throws Exception {
         DatagramSocket clientSocket = new DatagramSocket();
-        clientSocket.setSoTimeout(5000); // 5-second timeout
-        InetAddress IPAddress = InetAddress.getLocalHost();
+        clientSocket.setSoTimeout(10000); // 5-second timeout
+        InetAddress IPAddress = InetAddress.getByName("10.216.35.23");
         byte[] sendData = message.getBytes(StandardCharsets.UTF_8);
         DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, IPAddress, port);
         clientSocket.send(sendPacket);
