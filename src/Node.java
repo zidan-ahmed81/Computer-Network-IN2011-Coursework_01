@@ -221,6 +221,9 @@ public class Node implements NodeInterface {
                         System.out.println("Relayed message to " + targetNode + " at " + targetIP + ":" + targetPort);
                     }
                     break;
+                case 'I': // Information message
+                    System.out.println("Received information message: " + payload);
+                    break;
                 default:
                     System.out.println("Unhandled message type: " + type);
                     break;
