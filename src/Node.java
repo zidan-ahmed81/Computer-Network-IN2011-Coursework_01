@@ -536,6 +536,47 @@ public class Node implements NodeInterface {
         return null;
     }
 
+    public String readFrom(String key, String targetIp, int targetPort) throws Exception {
+        System.out.println("Initiating read for key: " + key + " from target " + targetIp + ":" + targetPort);
+        // Check local cache first.
+        if (dataStore.containsKey(key)) {
+            System.out.println("Key found in local cache.");
+            return dataStore.get(key);
+        }
+        String tid = generateTransactionID();
+        String message = tid + " R " + key + " ";
+        System.out.println("Sending R request: " + message);
+
+        int attempts = 0;
+        while (attempts < 3) {
+            // Send request only to the specified node.
+            sendRequest(message, InetAddress.getByName(targetIp), targetPort);
+            long startTime = System.currentTimeMillis();
+            int timeout = 5000;
+            byte[] buffer = new byte[1024];
+            DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
+            while (System.currentTimeMillis() - startTime < timeout) {
+                try {
+                    int remaining = timeout - (int)(System.currentTimeMillis() - startTime);
+                    socket.setSoTimeout(remaining);
+                    socket.receive(responsePacket);
+                    String response = new String(responsePacket.getData(), 0, responsePacket.getLength(), StandardCharsets.UTF_8);
+                    System.out.println("Received response: " + response);
+                    String[] tokens = response.split(" ", 4);
+                    if (tokens.length >= 4 && tokens[0].equals(tid) && tokens[1].equals("S") && tokens[2].equals("Y")) {
+                        dataStore.put(key, tokens[3].trim());
+                        return tokens[3].trim();
+                    }
+                } catch (SocketTimeoutException ste) {
+                    break;
+                }
+            }
+            attempts++;
+        }
+        return null;
+    }
+
+
     private String localRead(String key) {
         return dataStore.get(key);
     }

@@ -72,13 +72,14 @@ public class AzureLabTest {
             System.out.println("Node 1 attempting to read poem verses:");
             for (int i = 0; i < poemVerses.length; i++) {
                 String key = "D:jabberwocky" + i;
-                String verse = nodes[1].read(key);
+                String verse = nodes[1].readFrom(key, "10.200.51.19", 20114);
                 if (verse != null) {
                     System.out.println("Node 1 read " + key + ": " + verse);
                 } else {
                     System.err.println("Node 1 could not read " + key);
                 }
             }
+
 
             // Announce each node's address so that other nodes can contact them.
             for (int i = 0; i < numNodes; i++) {
