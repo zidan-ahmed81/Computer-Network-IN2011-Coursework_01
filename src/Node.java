@@ -6,7 +6,6 @@
 //  YOUR_STUDENT_ID_NUMBER_GOES_HERE
 //  YOUR_EMAIL_GOES_HERE
 
-
 // DO NOT EDIT starts
 // This gives the interface that your code must implement.
 // These descriptions are intended to help you understand how the interface
@@ -19,13 +18,12 @@ import java.util.concurrent.*;
 import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
 
-
 interface NodeInterface {
 
     /* These methods configure your node.
      * They must both be called once after the node has been created but
      * before it is used. */
-    
+
     // Set the name of the node.
     public void setNodeName(String nodeName) throws Exception;
 
@@ -42,7 +40,7 @@ interface NodeInterface {
     // there are no new incoming messages return.
     // If delay is zero then wait for an unlimited amount of time.
     public void handleIncomingMessages(int delay) throws Exception;
-    
+
     // Determines if a node can be contacted and is responding correctly.
     // Handles any messages that have arrived.
     public boolean isActive(String nodeName) throws Exception;
@@ -50,14 +48,14 @@ interface NodeInterface {
     // You need to keep a stack of nodes that are used to relay messages.
     // The base of the stack is the first node to be used as a relay.
     // The first node must relay to the second node and so on.
-    
+
     // Adds a node name to a stack of nodes used to relay all future messages.
     public void pushRelay(String nodeName) throws Exception;
 
     // Pops the top entry from the stack of nodes used for relaying.
     // No effect if the stack is empty
     public void popRelay() throws Exception;
-    
+
 
     /*
      * These methods provide access to the basic functionality of
@@ -67,7 +65,7 @@ interface NodeInterface {
     // Checks if there is an entry in the network with the given key.
     // Handles any messages that have arrived.
     public boolean exists(String key) throws Exception;
-    
+
     // Reads the entry stored in the network for key.
     // If there is a value, return it.
     // If there isn't a value, return null.
@@ -114,12 +112,30 @@ public class Node implements NodeInterface {
     @Override
     public void openPort(int portNumber) throws Exception {
         socket = new DatagramSocket(portNumber);
-        // Store your own address key/value pair using your node name as key.
-        String localAddress = InetAddress.getLocalHost().getHostAddress() + ":" + portNumber;
+
+        // Find a non-loopback IPv4 address from available network interfaces.
+        InetAddress selectedAddress = null;
+        for (Enumeration<java.net.NetworkInterface> nets = java.net.NetworkInterface.getNetworkInterfaces(); nets.hasMoreElements();) {
+            java.net.NetworkInterface netint = nets.nextElement();
+            if (!netint.isUp() || netint.isLoopback()) continue;
+            for (Enumeration<InetAddress> addrs = netint.getInetAddresses(); addrs.hasMoreElements();) {
+                InetAddress addr = addrs.nextElement();
+                if (!addr.isLoopbackAddress() && addr instanceof java.net.Inet4Address) {
+                    selectedAddress = addr;
+                    break;
+                }
+            }
+            if (selectedAddress != null) break;
+        }
+        if (selectedAddress == null) {
+            throw new Exception("No valid non-loopback network interface found.");
+        }
+
+        String localAddress = selectedAddress.getHostAddress() + ":" + portNumber;
         if (nodeName != null) {
             addressStore.put(nodeName, localAddress);
         }
-        System.out.println("Opened UDP port " + portNumber);
+        System.out.println("Opened UDP port " + portNumber + " at " + localAddress);
     }
 
     // Listen for incoming UDP messages for a specified delay (in milliseconds).
@@ -150,9 +166,19 @@ public class Node implements NodeInterface {
         String transactionId = parts[0];
         String command = parts[1];
         String payload = parts.length >= 3 ? parts[2] : "";
+
         switch (command) {
             case "G": // Name request – reply with our node name.
                 sendNameResponse(transactionId, senderAddress, senderPort);
+                break;
+            case "H": // Name response – update passive mapping.
+                // The payload should be the sender's node name.
+                String remoteNodeName = payload.trim();
+                String remoteAddress = senderAddress.getHostAddress() + ":" + senderPort;
+                if (!addressStore.containsKey(remoteNodeName)) {
+                    addressStore.put(remoteNodeName, remoteAddress);
+                    System.out.println("Passive mapping: Discovered node " + remoteNodeName + " at " + remoteAddress);
+                }
                 break;
             case "R": // Read request – payload is the key.
                 sendReadResponse(transactionId, payload, senderAddress, senderPort);
@@ -169,6 +195,25 @@ public class Node implements NodeInterface {
                     sendWriteResponse(transactionId, writeResult, senderAddress, senderPort);
                 }
                 break;
+            case "O": { // Nearest response – active mapping.
+                System.out.println("Received Nearest response: " + payload);
+                String[] tokens = payload.split(" ");
+                for (int i = 0; i < tokens.length;) {
+                    // Expect format: "0", <nodeName>, "0", <ip:port>
+                    if (i + 3 < tokens.length && "0".equals(tokens[i])) {
+                        String remoteNodeNameNearest = tokens[i + 1];
+                        String remoteAddrStr = tokens[i + 3];
+                        if (!addressStore.containsKey(remoteNodeNameNearest)) {
+                            addressStore.put(remoteNodeNameNearest, remoteAddrStr);
+                            System.out.println("Active mapping: Discovered node " + remoteNodeNameNearest + " at " + remoteAddrStr);
+                        }
+                        i += 4;
+                    } else {
+                        i++;
+                    }
+                }
+                break;
+            }
             case "C": // Compare-And-Swap request – payload: key, currentValue, newValue.
                 String[] partsCAS = payload.split(" ", 3);
                 if (partsCAS.length == 3) {
@@ -187,14 +232,23 @@ public class Node implements NodeInterface {
             case "E": // Key existence request – payload is the key.
                 processKeyExistenceRequest(transactionId, payload, senderAddress, senderPort);
                 break;
+            case "F": // Key existence response.
+                System.out.println("Received Key existence response: " + payload);
+                break;
             case "V": // Relay message – payload: target node + inner message.
                 processRelayMessage(transactionId, payload, senderAddress, senderPort);
                 break;
             case "I": // Information message – log it.
                 System.out.println("Received Information message: " + payload);
                 break;
-            case "S":
+            case "S": // Read response, which might be handled by synchronous methods.
                 System.out.println("Received an unexpected S response: " + payload);
+                break;
+            case "X": // Write response.
+                System.out.println("Received Write response (X): " + payload);
+                break;
+            case "D": // CAS response.
+                System.out.println("Received CAS response (D): " + payload);
                 break;
             default:
                 System.out.println("Unknown command: " + command);
@@ -308,6 +362,57 @@ public class Node implements NodeInterface {
         }
     }
 
+    // Converts a byte array to a hex string.
+    private String bytesToHex(byte[] bytes) {
+        StringBuilder hex = new StringBuilder();
+        for (byte b : bytes) {
+            String hexByte = Integer.toHexString(0xff & b);
+            if (hexByte.length() == 1) hex.append('0');
+            hex.append(hexByte);
+        }
+        return hex.toString();
+    }
+
+    // Actively query known nodes for addresses using a nearest request.
+    public void performActiveMapping() throws Exception {
+        // Use your node's own hash (computed in setNodeName) as the query.
+        String hexHash = bytesToHex(nodeHash);
+        String tid = generateTransactionID();
+        String request = tid + " N " + hexHash;
+
+        // Send the nearest request to each known remote node (excluding self).
+        for (Map.Entry<String, String> entry : addressStore.entrySet()) {
+            if (entry.getKey().equals(nodeName)) continue; // Skip self.
+            String addrStr = entry.getValue();
+            String[] parts = addrStr.split(":");
+            InetAddress addr = InetAddress.getByName(parts[0]);
+            int port = Integer.parseInt(parts[1]);
+
+            sendRequest(request, addr, port);
+            System.out.println("Sent Nearest request: " + request + " to " + addrStr);
+        }
+    }
+
+    // Start periodic active mapping to refresh the addressStore.
+    public void startPeriodicActiveMapping(long periodMillis) {
+        Thread mappingThread = new Thread(() -> {
+            while (true) {
+                try {
+                    performActiveMapping();
+                    Thread.sleep(periodMillis);
+                } catch (InterruptedException ie) {
+                    System.err.println("Active mapping thread interrupted.");
+                    break;
+                } catch (Exception e) {
+                    System.err.println("Error during periodic active mapping: " + e.getMessage());
+                }
+            }
+        });
+        mappingThread.setDaemon(true);
+        mappingThread.start();
+        System.out.println("Started periodic active mapping every " + periodMillis + " ms");
+    }
+
     // Helper method to forward a message and wait for a response.
     private String forwardRelay(String message, InetAddress targetAddr, int targetPort) {
         try {
@@ -320,7 +425,7 @@ public class Node implements NodeInterface {
             DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
             while (System.currentTimeMillis() - startTime < timeout) {
                 try {
-                    int remaining = timeout - (int)(System.currentTimeMillis() - startTime);
+                    int remaining = timeout - (int) (System.currentTimeMillis() - startTime);
                     socket.setSoTimeout(remaining);
                     socket.receive(responsePacket);
                     String response = new String(responsePacket.getData(), 0, responsePacket.getLength(), StandardCharsets.UTF_8);
@@ -412,7 +517,7 @@ public class Node implements NodeInterface {
             DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
             while (System.currentTimeMillis() - startTime < timeout) {
                 try {
-                    int remaining = timeout - (int)(System.currentTimeMillis() - startTime);
+                    int remaining = timeout - (int) (System.currentTimeMillis() - startTime);
                     socket.setSoTimeout(remaining);
                     socket.receive(responsePacket);
                     String response = new String(responsePacket.getData(), 0, responsePacket.getLength(), StandardCharsets.UTF_8);
@@ -430,7 +535,6 @@ public class Node implements NodeInterface {
         }
         return null;
     }
-
 
     private String localRead(String key) {
         return dataStore.get(key);
@@ -504,8 +608,8 @@ public class Node implements NodeInterface {
         int len = s.length();
         byte[] data = new byte[len / 2];
         for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte)((Character.digit(s.charAt(i), 16) << 4)
-                    + Character.digit(s.charAt(i+1), 16));
+            data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)
+                    + Character.digit(s.charAt(i + 1), 16));
         }
         return data;
     }
@@ -520,6 +624,7 @@ public class Node implements NodeInterface {
         String nodeName;
         String address;
         int distance;
+
         AddressDistance(String nodeName, String address, int distance) {
             this.nodeName = nodeName;
             this.address = address;

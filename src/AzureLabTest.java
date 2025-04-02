@@ -14,12 +14,16 @@ public class AzureLabTest {
             Node node = new Node();
             String nodeName = "N:" + emailAddress;
             node.setNodeName(nodeName);
-            int port = 20110; // Use a port in the allowed range (e.g., 20110 to 20130).
+            int port = 20114; // Use a port in the allowed range (e.g., 20110 to 20130).
             node.openPort(port);
 
             // Allow time for bootstrapping (to receive addresses from other nodes).
             System.out.println("Waiting for bootstrapping...");
             node.handleIncomingMessages(5000);
+            // Example: After waiting for bootstrapping in your AzureLabTest or LocalTest:
+            System.out.println("Performing active mapping...");
+            node.performActiveMapping();
+
 
             // Test reading poem verses from the network.
             System.out.println("Attempting to read poem verses:");
