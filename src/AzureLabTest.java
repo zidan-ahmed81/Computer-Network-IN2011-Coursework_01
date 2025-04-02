@@ -11,7 +11,7 @@ public class AzureLabTest {
             String emailAddress = "zidan.ahmed.2@city.ac.uk";
 
             // Number of nodes to simulate.
-            int numNodes = 3;
+            int numNodes = 6;
             Node[] nodes = new Node[numNodes];
 
             // Create and initialize each node with a unique name and port.
@@ -34,7 +34,8 @@ public class AzureLabTest {
                 final int index = i;
                 new Thread(() -> {
                     try {
-                        nodes[index].handleIncomingMessages(0); // 0 means wait indefinitely.
+                        // 0 means wait indefinitely for messages.
+                        nodes[index].handleIncomingMessages(0);
                     } catch (Exception e) {
                         System.err.println("Exception in node " + index);
                         e.printStackTrace();
@@ -46,17 +47,37 @@ public class AzureLabTest {
             System.out.println("Waiting for nodes to bootstrap...");
             Thread.sleep(10000);
 
-            // Example operation: Node 0 writes a key/value pair.
-            boolean writeSuccess = nodes[0].write("D:sampleKey", "Hello from node0!");
-            System.out.println("Node 0 wrote key D:sampleKey with value 'Hello from node0!'");
+            // Write the poem verses from Node0.
+            String[] poemVerses = {
+                    "’Twas brillig, and the slithy toves",
+                    "Did gyre and gimble in the wabe;",
+                    "All mimsy were the borogoves,",
+                    "And the mome raths outgrabe.",
+                    "Beware the Jabberwock, my son!",
+                    "The jaws that bite, the claws that catch!",
+                    "Beware the Jubjub bird, and shun"
+            };
+
+            for (int i = 0; i < poemVerses.length; i++) {
+                String key = "D:jabberwocky" + i;
+                boolean success = nodes[0].write(key, poemVerses[i]);
+                System.out.println("Node 0 wrote " + key + " with value: " + poemVerses[i]);
+                Thread.sleep(500); // slight delay between writes
+            }
+
+            // Allow time for propagation.
             Thread.sleep(2000);
 
-            // Attempt to read the key from Node 1.
-            String value = nodes[1].read("D:sampleKey");
-            if (value != null) {
-                System.out.println("Node 1 read key D:sampleKey: " + value);
-            } else {
-                System.err.println("Node 1 could not read key D:sampleKey.");
+            // Attempt to read the poem verses from Node1.
+            System.out.println("Node 1 attempting to read poem verses:");
+            for (int i = 0; i < poemVerses.length; i++) {
+                String key = "D:jabberwocky" + i;
+                String verse = nodes[1].read(key);
+                if (verse != null) {
+                    System.out.println("Node 1 read " + key + ": " + verse);
+                } else {
+                    System.err.println("Node 1 could not read " + key);
+                }
             }
 
             // Announce each node's address so that other nodes can contact them.
