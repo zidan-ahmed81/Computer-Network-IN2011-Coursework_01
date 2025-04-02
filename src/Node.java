@@ -63,11 +63,12 @@ public class Node implements NodeInterface {
                 while (running) {
                     byte[] buffer = new byte[4096];
                     DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                    System.out.println("Waiting for incoming packets on port " + port + "...");
                     socket.receive(packet);
                     processPacket(packet);
                 }
             } catch (SocketException se) {
-                System.out.println("Socket closed, stopping listener thread.");
+                System.out.println("Socket closed, listener thread stopping.");
             } catch (Exception e) {
                 e.printStackTrace();
             }

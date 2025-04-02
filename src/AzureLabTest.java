@@ -17,7 +17,7 @@ public class AzureLabTest {
     private static String sendUDPMessage(String message, String destIP, int destPort) throws Exception {
         DatagramSocket clientSocket = new DatagramSocket();
         // Set timeout (e.g., 10 seconds)
-        clientSocket.setSoTimeout(10000);
+        clientSocket.setSoTimeout(30000);
         InetAddress IPAddress = InetAddress.getByName(destIP);
         byte[] sendData = message.getBytes(StandardCharsets.UTF_8);
         DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, IPAddress, destPort);
@@ -25,7 +25,14 @@ public class AzureLabTest {
 
         byte[] receiveData = new byte[4096];
         DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
-        clientSocket.receive(receivePacket);
+        try {
+            clientSocket.receive(receivePacket);
+        } catch (SocketTimeoutException e) {
+            System.out.println("No response received within timeout period.");
+            clientSocket.close();
+            return "";  // Or return a default value, or you could retry here
+        }
+
         String response = new String(receivePacket.getData(), 0, receivePacket.getLength(), StandardCharsets.UTF_8);
         clientSocket.close();
         return response;
@@ -36,7 +43,7 @@ public class AzureLabTest {
         // Your VM's IP address – change this to your actual VM IP (from ip a)
         String myVmIp = "10.216.35.23";
         // Your email address – this will be used as the node name for your primary node.
-        String emailAddress = "student@example.com";
+        String emailAddress = "zidan.ahmed.2@city.ac.uk";
         // CRN bootstrap node on the Azure lab – typically one of these:
         String azureBootstrapIP = "10.200.51.19";
         int azureBootstrapPort = 20114;
