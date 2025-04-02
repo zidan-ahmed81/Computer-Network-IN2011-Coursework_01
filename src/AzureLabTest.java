@@ -3,7 +3,7 @@ import java.net.InetAddress;
 public class AzureLabTest {
     public static void main(String[] args) {
         try {
-            // Automatically detect your VM's actual IP address.
+            // Detect your VM's actual IP address.
             String ipAddress = InetAddress.getLocalHost().getHostAddress();
             System.out.println("Detected VM IP: " + ipAddress);
 
@@ -20,11 +20,11 @@ public class AzureLabTest {
                 // Each node gets a unique name by appending an index.
                 String nodeName = "N:" + emailAddress + "-" + i;
                 nodes[i].setNodeName(nodeName);
-                // Use ports in the allowed range, e.g., 20110, 20111, 20112.
+                // Use ports in the allowed range, e.g., 20110, 20111, ...
                 nodes[i].openPort(20110 + i);
             }
 
-            // Start periodic active mapping on each node (every 5000 ms).
+            // Start periodic active mapping on each node (refresh every 5000 ms).
             for (int i = 0; i < numNodes; i++) {
                 nodes[i].startPeriodicActiveMapping(5000);
             }
@@ -47,7 +47,7 @@ public class AzureLabTest {
             System.out.println("Waiting for nodes to bootstrap...");
             Thread.sleep(10000);
 
-            // Write the poem verses from Node0.
+            // Node0 writes the poem verses.
             String[] poemVerses = {
                     "’Twas brillig, and the slithy toves",
                     "Did gyre and gimble in the wabe;",
@@ -61,25 +61,25 @@ public class AzureLabTest {
             for (int i = 0; i < poemVerses.length; i++) {
                 String key = "D:jabberwocky" + i;
                 boolean success = nodes[0].write(key, poemVerses[i]);
-                System.out.println("Node 0 wrote " + key + " with value: " + poemVerses[i]);
+                System.out.println("Node0 wrote " + key + " with value: " + poemVerses[i]);
                 Thread.sleep(500); // slight delay between writes
             }
 
             // Allow time for propagation.
             Thread.sleep(2000);
 
-            // Attempt to read the poem verses from Node1.
-            System.out.println("Node 1 attempting to read poem verses:");
+            // Node1 attempts to read the poem verses.
+            // Using readFrom to target a specific node (IP "10.200.51.19", port 20114)
+            System.out.println("Node1 attempting to read poem verses:");
             for (int i = 0; i < poemVerses.length; i++) {
                 String key = "D:jabberwocky" + i;
                 String verse = nodes[1].readFrom(key, "10.200.51.19", 20114);
                 if (verse != null) {
-                    System.out.println("Node 1 read " + key + ": " + verse);
+                    System.out.println("Node1 read " + key + ": " + verse);
                 } else {
-                    System.err.println("Node 1 could not read " + key);
+                    System.err.println("Node1 could not read " + key);
                 }
             }
-
 
             // Announce each node's address so that other nodes can contact them.
             for (int i = 0; i < numNodes; i++) {
