@@ -38,6 +38,7 @@ public class Node implements NodeInterface {
         knownNodes = Collections.synchronizedList(new ArrayList<>());
         neighbors = new ArrayList<>();
         relayStack = new ArrayDeque<>();
+        System.out.println("[DEBUG] Node constructor: Collections initialized.");
     }
 
     @Override
@@ -146,8 +147,11 @@ public class Node implements NodeInterface {
         String requestMessage = txID + " R " + key;
         byte[] requestBytes = requestMessage.getBytes(StandardCharsets.UTF_8);
 
-        // Iterate over the neighbors list (ensured not null by constructor)
+        // Debug: print number of neighbors
+        System.out.println("[DEBUG] read(): Number of neighbors: " + neighbors.size());
         for (InetSocketAddress neighbor : neighbors) {
+            System.out.println("[DEBUG] read(): Sending request to neighbor " +
+                    neighbor.getAddress().getHostAddress() + ":" + neighbor.getPort());
             DatagramPacket packet = new DatagramPacket(requestBytes, requestBytes.length,
                     neighbor.getAddress(), neighbor.getPort());
             socket.send(packet);
@@ -165,10 +169,12 @@ public class Node implements NodeInterface {
                 if (response.startsWith(txID)) {
                     String[] parts = response.split(" ", 4);
                     if (parts.length >= 3 && "Y".equals(parts[2]) && parts.length == 4) {
+                        System.out.println("[DEBUG] read(): Received response: " + response);
                         return parts[3];
                     }
                 }
             } catch (SocketTimeoutException e) {
+                System.out.println("[DEBUG] read(): Socket timeout waiting for response.");
                 break;
             }
         }
@@ -202,13 +208,14 @@ public class Node implements NodeInterface {
             InetAddress addr = InetAddress.getByName(ip);
             for (int port = 20110; port <= 20116; port++) {
                 InetSocketAddress neighborAddr = new InetSocketAddress(addr, port);
+                // Skip our own address if applicable
                 if (socket != null && socket.getLocalPort() == port) continue;
                 neighbors.add(neighborAddr);
             }
         }
-        System.out.println("Bootstrapped neighbors:");
+        System.out.println("[DEBUG] Bootstrap complete. Neighbors:");
         for (InetSocketAddress n : neighbors) {
-            System.out.println("  " + n.getAddress().getHostAddress() + ":" + n.getPort());
+            System.out.println("[DEBUG]   " + n.getAddress().getHostAddress() + ":" + n.getPort());
         }
     }
 
