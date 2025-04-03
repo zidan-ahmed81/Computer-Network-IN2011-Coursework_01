@@ -23,6 +23,7 @@ public class Node implements NodeInterface {
     private String nodeName;
     private int port;
     private DatagramSocket socket;
+    private final int MAX_PACKET_SIZE = 512; // A safe upper bound for UDP message size
     // Use a thread-safe map for storing key/value pairs.
     private Map<String, String> dataStore = new ConcurrentHashMap<>();
     // Stack for relay nodes.
@@ -46,44 +47,49 @@ public class Node implements NodeInterface {
 
     @Override
     public void handleIncomingMessages(int delay) throws Exception {
-        if (socket == null) {
-            throw new Exception("Socket not open. Call openPort first.");
-        }
-        byte[] buffer = new byte[1024];
-        DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+        long endTime = System.currentTimeMillis() + delay;
 
-        if (delay > 0) {
-            socket.setSoTimeout(delay);
-        }
-        try {
-            while (true) {
+        while (delay == 0 || System.currentTimeMillis() < endTime) {
+            try {
+                socket.setSoTimeout(Math.max(1, delay == 0 ? 0 : (int)(endTime - System.currentTimeMillis())));
+                byte[] buffer = new byte[MAX_PACKET_SIZE];
+                DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 socket.receive(packet);
-                processMessage(packet.getData(), packet.getLength());
-                packet.setLength(buffer.length); // Reset for next receive.
-            }
-        } catch (SocketTimeoutException ste) {
-            System.out.println("Socket timed out after " + delay + " ms. Exiting message loop.");
-        } catch (SocketException se) {
-            if (socket.isClosed()) {
-                System.out.println("Socket closed, exiting message loop.");
+
+                String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
+                processMessage(message, packet.getAddress(), packet.getPort());
+            } catch (java.net.SocketTimeoutException e) {
+                // Timeout reached, no incoming packets
                 return;
             }
-            throw se;
-        }
-    }
-
-    private void processMessage(byte[] data, int length) {
-        String received = new String(data, 0, length, StandardCharsets.UTF_8);
-        System.out.println("Received message: " + received);
-        if (received.length() >= 4) {
-            char messageType = received.charAt(3);
-            System.out.println("Message type: " + messageType);
-        } else {
-            System.out.println("Message too short to determine type.");
         }
     }
 
 
+    private void processMessage(String message, InetAddress senderAddress, int senderPort) throws Exception {
+        String[] parts = message.split(" ", 3); // Expecting at least: ID1 ID2 TYPE...
+        if (parts.length < 3) return;
+
+        String transactionID = parts[0] + parts[1];
+        char type = parts[2].charAt(0);
+
+        switch (type) {
+            case 'G': // Name Request
+                sendNameResponse(transactionID, senderAddress, senderPort);
+                break;
+            // You'll add other types like 'E', 'R', 'W', etc. here
+            default:
+                // Optionally print or log unrecognized types
+                break;
+        }
+    }
+
+    private void sendNameResponse(String transactionID, InetAddress address, int port) throws Exception {
+        String response = transactionID + " H " + nodeName + " ";
+        byte[] data = response.getBytes(StandardCharsets.UTF_8);
+        DatagramPacket packet = new DatagramPacket(data, data.length, address, port);
+        socket.send(packet);
+    }
 
     @Override
     public boolean isActive(String nodeName) throws Exception {
@@ -110,31 +116,7 @@ public class Node implements NodeInterface {
 
     @Override
     public String read(String key) throws Exception {
-        String value = dataStore.get(key);
-        // OPTIONAL: For local testing of AzureLabTest, simulate poem verses if not already in store.
-        if (value == null && key.startsWith("D:jabberwocky")) {
-            int index;
-            try {
-                index = Integer.parseInt(key.substring("D:jabberwocky".length()));
-            } catch (NumberFormatException e) {
-                return null;
-            }
-            String[] dummyPoem = {
-                    "Twas brillig, and the slithy toves",
-                    "Did gyre and gimble in the wabe;",
-                    "All mimsy were the borogoves,",
-                    "And the mome raths outgrabe.",
-                    "Beware the Jabberwock, my son!",
-                    "The jaws that bite, the claws that catch!",
-                    "Beware the Jubjub bird, and shun"
-            };
-            if (index >= 0 && index < dummyPoem.length) {
-                value = dummyPoem[index];
-                // Optionally, store it for subsequent reads.
-                dataStore.put(key, value);
-            }
-        }
-        return value;
+        return dataStore.get(key);
     }
 
     @Override
