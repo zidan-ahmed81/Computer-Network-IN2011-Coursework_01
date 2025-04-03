@@ -1,5 +1,6 @@
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Stack;
 import java.util.concurrent.ConcurrentHashMap;
@@ -51,33 +52,32 @@ public class Node implements NodeInterface {
         byte[] buffer = new byte[1024];
         DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
 
-        // Set timeout if delay > 0.
         if (delay > 0) {
             socket.setSoTimeout(delay);
         }
         try {
             while (true) {
                 socket.receive(packet);
-                // Convert the packet data to a string.
-                String received = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
+                System.out.println("Packet received with length: " + packet.getLength());
+                byte[] rawData = Arrays.copyOf(packet.getData(), packet.getLength());
+                System.out.println("Raw data: " + Arrays.toString(rawData));
+
+                String received = new String(rawData, StandardCharsets.UTF_8);
                 System.out.println("Received message: " + received);
 
-                // Assuming CRN messages start with a 2-byte transaction ID, a space, and then the message type,
-                // the message type might be at index 3.
                 if (received.length() >= 4) {
                     char messageType = received.charAt(3);
                     System.out.println("Message type: " + messageType);
                 } else {
                     System.out.println("Message too short to determine type.");
                 }
-                // Reset packet length for the next receive.
-                packet.setLength(buffer.length);
+                packet.setLength(buffer.length); // Reset for next receive.
             }
         } catch (SocketTimeoutException ste) {
-            // Timeout reached; exit the method.
+            System.out.println("Socket timed out after " + delay + " ms. Exiting message loop.");
         } catch (SocketException se) {
-            // If the socket was closed, exit gracefully.
             if (socket.isClosed()) {
+                System.out.println("Socket closed, exiting message loop.");
                 return;
             }
             throw se;
