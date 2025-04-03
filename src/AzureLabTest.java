@@ -44,6 +44,7 @@ class AzureLabTest {
 
             int port = 20110;
             node.openPort(port);
+            node.bootstrap();
 
             // Wait and hope that we get sent the address of some other nodes
             System.out.println("Waiting for another node to get in contact");
