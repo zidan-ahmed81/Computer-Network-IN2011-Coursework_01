@@ -58,19 +58,7 @@ public class Node implements NodeInterface {
         try {
             while (true) {
                 socket.receive(packet);
-                System.out.println("Packet received with length: " + packet.getLength());
-                byte[] rawData = Arrays.copyOf(packet.getData(), packet.getLength());
-                System.out.println("Raw data: " + Arrays.toString(rawData));
-
-                String received = new String(rawData, StandardCharsets.UTF_8);
-                System.out.println("Received message: " + received);
-
-                if (received.length() >= 4) {
-                    char messageType = received.charAt(3);
-                    System.out.println("Message type: " + messageType);
-                } else {
-                    System.out.println("Message too short to determine type.");
-                }
+                processMessage(packet.getData(), packet.getLength());
                 packet.setLength(buffer.length); // Reset for next receive.
             }
         } catch (SocketTimeoutException ste) {
@@ -83,6 +71,19 @@ public class Node implements NodeInterface {
             throw se;
         }
     }
+
+    private void processMessage(byte[] data, int length) {
+        String received = new String(data, 0, length, StandardCharsets.UTF_8);
+        System.out.println("Received message: " + received);
+        if (received.length() >= 4) {
+            char messageType = received.charAt(3);
+            System.out.println("Message type: " + messageType);
+        } else {
+            System.out.println("Message too short to determine type.");
+        }
+    }
+
+
 
     @Override
     public boolean isActive(String nodeName) throws Exception {
