@@ -18,20 +18,17 @@ interface NodeInterface {
 
 public class Node implements NodeInterface {
 
-    // The node's own name.
     private String nodeName;
 
-    // The UDP socket used for sending/receiving messages.
     private DatagramSocket socket;
 
-    // A simple local store for key/value pairs.
     private Map<String, String> localStore = new ConcurrentHashMap<>();
 
-    // A list representing your known nodes (routing table).
-// In a real implementation, you would choose the closest nodes based on hash distance.
     private List<InetSocketAddress> knownNodes = Collections.synchronizedList(new ArrayList<>());
     private ArrayDeque<String> relayStack;
     private HashMap<Object, Object> dataStore;
+    private List<InetSocketAddress> neighbors = new ArrayList<>();
+
 
 
     @Override
@@ -95,73 +92,29 @@ public class Node implements NodeInterface {
         return dataStore.containsKey(key);
     }
 
-    @Override
-    public String read(String key) throws Exception {
-        // 1. First, check if the key exists locally.
-        if (localStore.containsKey(key)) {
-            return localStore.get(key);
-        }
-
-        // 2. Generate a transaction ID for this request.
-        // A simple example: generate two random letters (ensuring they're not spaces).
-        String txID = generateTxID();
-
-        // 3. Construct the read request message.
-        // According to the CRN protocol, a read request is: "<txID> R <key>"
-        String requestMessage = txID + " R " + key;
-        byte[] requestBytes = requestMessage.getBytes(StandardCharsets.UTF_8);
-
-        // 4. Determine the nearest nodes to the key.
-        // In a real implementation, you would use your routing table to get the three closest nodes.
-        // Here we simply return all known nodes.
-        List<InetSocketAddress> targets = getNearestNodes(key);
-
-        // 5. Send the read request to each target node.
-        for (InetSocketAddress target : targets) {
-            DatagramPacket packet = new DatagramPacket(requestBytes, requestBytes.length,
-                    target.getAddress(), target.getPort());
-            socket.send(packet);
-        }
-
-        // 6. Wait for a response with a timeout.
-        byte[] buffer = new byte[1024];
-        DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
-        long startTime = System.currentTimeMillis();
-        // We wait up to 5 seconds for a response (you might want to resend if none is received).
-        while (System.currentTimeMillis() - startTime < 5000) {
-            try {
-                socket.setSoTimeout(5000);
-                socket.receive(responsePacket);
-
-                // 7. Process the response message.
-                String response = new String(responsePacket.getData(), 0, responsePacket.getLength(),
-                        StandardCharsets.UTF_8);
-                // Verify that the transaction ID matches.
-                if (response.startsWith(txID)) {
-                    // The expected response format is: "<txID> S <responseChar> <value>"
-                    String[] parts = response.split(" ", 4);
-                    if (parts.length >= 3) {
-                        String responseChar = parts[2];
-                        if ("Y".equals(responseChar) && parts.length == 4) {
-                            // Condition A true: the remote node has the key.
-                            return parts[3];
-                        } else {
-                            // Either the key wasn’t found, or the response isn’t what we expected.
-                            // You could try additional nodes or return null.
-                            return null;
-                        }
-                    }
-                }
-            } catch (SocketTimeoutException e) {
-                // Timeout reached: break out of the loop.
-                break;
+    // Bootstrap method that initializes the routing table.
+// For demonstration we add the Azure lab nodes (10.200.51.18 and 10.200.51.19 on ports 20110 to 20116).
+    public void bootstrap() throws Exception {
+        neighbors.clear();  // Ensure the list is empty before bootstrapping.
+        String[] bootstrapIPs = {"10.200.51.18", "10.200.51.19"};
+        for (String ip : bootstrapIPs) {
+            InetAddress addr = InetAddress.getByName(ip);
+            for (int port = 20110; port <= 20116; port++) {
+                // Optional: avoid adding your own address.
+                // For example, if your node's port is 20110 and your name indicates your identity,
+                // you could check and skip that entry.
+                InetSocketAddress neighborAddress = new InetSocketAddress(addr, port);
+                // For now, add all provided bootstrap addresses.
+                neighbors.add(neighborAddress);
             }
         }
-        // If no valid response is received, return null.
-        return null;
+        System.out.println("Bootstrapped neighbors:");
+        for (InetSocketAddress n : neighbors) {
+            System.out.println("  " + n.getAddress().getHostAddress() + ":" + n.getPort());
+        }
     }
 
-    // Helper method to generate a simple transaction ID.
+    // Helper method to generate a transaction ID.
     private String generateTxID() {
         Random random = new Random();
         char c1 = (char) ('A' + random.nextInt(26));
@@ -169,10 +122,46 @@ public class Node implements NodeInterface {
         return "" + c1 + c2;
     }
 
-    // Helper method to get the nearest nodes to the key.
-// This is a simplified version. In practice, use your routing table and the hash distance metric.
-    private List<InetSocketAddress> getNearestNodes(String key) {
-        return knownNodes;
+    // The read method (simplified example).
+    @Override
+    public String read(String key) throws Exception {
+        // Check local store first.
+        if (localStore.containsKey(key)) return localStore.get(key);
+
+        String txID = generateTxID();
+        String requestMessage = txID + " R " + key;
+        byte[] requestBytes = requestMessage.getBytes(StandardCharsets.UTF_8);
+
+        // Use the neighbors list from bootstrapping.
+        for (InetSocketAddress neighbor : neighbors) {
+            DatagramPacket packet = new DatagramPacket(requestBytes, requestBytes.length,
+                    neighbor.getAddress(), neighbor.getPort());
+            socket.send(packet);
+        }
+
+        // Wait for a response (simplified with a timeout).
+        byte[] buffer = new byte[1024];
+        DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
+        long startTime = System.currentTimeMillis();
+        while (System.currentTimeMillis() - startTime < 5000) {
+            try {
+                socket.setSoTimeout(5000);
+                socket.receive(responsePacket);
+                String response = new String(responsePacket.getData(), 0, responsePacket.getLength(), StandardCharsets.UTF_8);
+                if (response.startsWith(txID)) {
+                    String[] parts = response.split(" ", 4);
+                    if (parts.length >= 3) {
+                        String responseChar = parts[2];
+                        if ("Y".equals(responseChar) && parts.length == 4) {
+                            return parts[3];
+                        }
+                    }
+                }
+            } catch (SocketTimeoutException e) {
+                break;
+            }
+        }
+        return null;
     }
 
 
