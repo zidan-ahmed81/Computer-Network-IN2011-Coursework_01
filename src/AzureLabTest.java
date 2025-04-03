@@ -39,13 +39,14 @@ public class AzureLabTest {
         // === Configuration ===
         // Your VM's IP address – replace with your actual VM IP (from ip a)
         String myVmIp = "10.216.35.23";
-        // Your email address – used for your primary node's name.
-        String emailAddress = "student@example.com";
-        // External Azure bootstrap nodes – use multiple for better bootstrapping.
+        // Your university email address – used for your primary node's name.
+        String emailAddress = "zidan.ahmed.2@city.ac.uk";
+        // External Azure bootstrap nodes – add as many as are available.
         String[] externalBootstrapNodes = {
                 "10.200.51.19:20114",
                 "10.200.51.18:20111",
-                "10.200.51.19:20116"
+                "10.200.51.19:20116",
+                "10.200.51.18:20112"
         };
 
         // === Create multiple local Node instances ===
@@ -170,27 +171,31 @@ public class AzureLabTest {
         // === External Azure Node Tests ===
         System.out.println("=== External Azure Node Tests ===");
 
-        // We'll test with one of the external bootstrap nodes. You can try them all.
-        String externalNodeKey = "N:Azure1"; // Using the first external node
+        // We'll test with one of the external bootstrap nodes (first one).
+        String externalNode = externalBootstrapNodes[0]; // e.g., "10.200.51.19:20114"
+        String[] parts = externalNode.split(":");
+        String extIP = parts[0];
+        int extPort = Integer.parseInt(parts[1]);
+
         // a) Name Request to external node.
         txnID = generateTransactionID();
         String azureNameRequest = txnID + " G ";
-        System.out.println("Sending Name Request to External Azure node (" + externalBootstrapNodes[0] + "): " + azureNameRequest);
-        String azureNameResponse = sendUDPMessage(azureNameRequest, externalBootstrapNodes[0].split(":")[0], Integer.parseInt(externalBootstrapNodes[0].split(":")[1]));
+        System.out.println("Sending Name Request to External Azure node (" + externalNode + "): " + azureNameRequest);
+        String azureNameResponse = sendUDPMessage(azureNameRequest, extIP, extPort);
         System.out.println("Received Name Response from External Azure node: " + azureNameResponse);
 
         // b) Nearest Request to external node.
         txnID = generateTransactionID();
         String azureNearestRequest = txnID + " N dummyhash";
-        System.out.println("Sending Nearest Request to External Azure node (" + externalBootstrapNodes[0] + "): " + azureNearestRequest);
-        String azureNearestResponse = sendUDPMessage(azureNearestRequest, externalBootstrapNodes[0].split(":")[0], Integer.parseInt(externalBootstrapNodes[0].split(":")[1]));
+        System.out.println("Sending Nearest Request to External Azure node (" + externalNode + "): " + azureNearestRequest);
+        String azureNearestResponse = sendUDPMessage(azureNearestRequest, extIP, extPort);
         System.out.println("Received Nearest Response from External Azure node: " + azureNearestResponse);
 
         // c) Read Request for a jabberwocky verse from external node.
         txnID = generateTransactionID();
         String azureReadRequest = txnID + " R D:jabberwocky0";
-        System.out.println("Sending Read Request to External Azure node (" + externalBootstrapNodes[0] + "): " + azureReadRequest);
-        String azureReadResponse = sendUDPMessage(azureReadRequest, externalBootstrapNodes[0].split(":")[0], Integer.parseInt(externalBootstrapNodes[0].split(":")[1]));
+        System.out.println("Sending Read Request to External Azure node (" + externalNode + "): " + azureReadRequest);
+        String azureReadResponse = sendUDPMessage(azureReadRequest, extIP, extPort);
         System.out.println("Received Read Response from External Azure node: " + azureReadResponse);
 
         // d) Write Request to external node.
@@ -198,15 +203,15 @@ public class AzureLabTest {
         String azureMarkerKey = "D:AzureMarker";
         String azureMarkerValue = "WorksWithAzure!";
         String azureWriteRequest = txnID + " W " + azureMarkerKey + " " + azureMarkerValue;
-        System.out.println("Sending Write Request to External Azure node (" + externalBootstrapNodes[0] + "): " + azureWriteRequest);
-        String azureWriteResponse = sendUDPMessage(azureWriteRequest, externalBootstrapNodes[0].split(":")[0], Integer.parseInt(externalBootstrapNodes[0].split(":")[1]));
+        System.out.println("Sending Write Request to External Azure node (" + externalNode + "): " + azureWriteRequest);
+        String azureWriteResponse = sendUDPMessage(azureWriteRequest, extIP, extPort);
         System.out.println("Received Write Response from External Azure node: " + azureWriteResponse);
 
         // e) Read back the marker from external node.
         txnID = generateTransactionID();
         String azureReadMarker = txnID + " R " + azureMarkerKey;
-        System.out.println("Sending Read Request for marker to External Azure node (" + externalBootstrapNodes[0] + "): " + azureReadMarker);
-        String azureReadMarkerResponse = sendUDPMessage(azureReadMarker, externalBootstrapNodes[0].split(":")[0], Integer.parseInt(externalBootstrapNodes[0].split(":")[1]));
+        System.out.println("Sending Read Request for marker to External Azure node (" + externalNode + "): " + azureReadMarker);
+        String azureReadMarkerResponse = sendUDPMessage(azureReadMarker, extIP, extPort);
         System.out.println("Received Read Response for marker from External Azure node: " + azureReadMarkerResponse);
 
         System.out.println("Multi-node and External Azure node tests complete.");
