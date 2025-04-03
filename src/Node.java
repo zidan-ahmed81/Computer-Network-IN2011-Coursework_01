@@ -1,6 +1,5 @@
 import java.net.*;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.Map;
 import java.util.Stack;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,8 +20,8 @@ interface NodeInterface {
 public class Node implements NodeInterface {
 
     private String nodeName;
-    private int port;
     private DatagramSocket socket;
+
     private final int MAX_PACKET_SIZE = 512; // A safe upper bound for UDP message size
     // Use a thread-safe map for storing key/value pairs.
     private Map<String, String> dataStore = new ConcurrentHashMap<>();
@@ -32,63 +31,40 @@ public class Node implements NodeInterface {
     @Override
     public void setNodeName(String nodeName) throws Exception {
         this.nodeName = nodeName;
-        // If the socket is already open, add our own address key/value pair.
-        if (socket != null) {
-            String ip = InetAddress.getLocalHost().getHostAddress();
-            dataStore.put(nodeName, ip + ":" + port);
-        }
+        System.out.println("Node name set to: " + nodeName);
     }
 
     @Override
     public void openPort(int portNumber) throws Exception {
-        this.port = portNumber;
         socket = new DatagramSocket(portNumber);
+        socket.setSoTimeout(1000); // Check every second when using a delay
+        System.out.println("Opened port: " + portNumber);
     }
 
     @Override
     public void handleIncomingMessages(int delay) throws Exception {
-        long endTime = System.currentTimeMillis() + delay;
+        System.out.println("Listening for incoming messages...");
 
-        while (delay == 0 || System.currentTimeMillis() < endTime) {
+        long start = System.currentTimeMillis();
+        while (true) {
+            if (delay > 0 && System.currentTimeMillis() - start >= delay) {
+                System.out.println("Timeout reached, exiting handleIncomingMessages()");
+                return;
+            }
+
             try {
-                socket.setSoTimeout(Math.max(1, delay == 0 ? 0 : (int)(endTime - System.currentTimeMillis())));
-                byte[] buffer = new byte[MAX_PACKET_SIZE];
+                byte[] buffer = new byte[1024];
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 socket.receive(packet);
 
-                String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
-                processMessage(message, packet.getAddress(), packet.getPort());
-            } catch (java.net.SocketTimeoutException e) {
-                // Timeout reached, no incoming packets
-                return;
+                String message = new String(packet.getData(), 0, packet.getLength());
+                System.out.println("Received message: " + message);
+
+                // For now we don't parse or reply to messages
+            } catch (SocketTimeoutException e) {
+                // Continue waiting until delay expires
             }
         }
-    }
-
-
-    private void processMessage(String message, InetAddress senderAddress, int senderPort) throws Exception {
-        String[] parts = message.split(" ", 3); // Expecting at least: ID1 ID2 TYPE...
-        if (parts.length < 3) return;
-
-        String transactionID = parts[0] + parts[1];
-        char type = parts[2].charAt(0);
-
-        switch (type) {
-            case 'G': // Name Request
-                sendNameResponse(transactionID, senderAddress, senderPort);
-                break;
-            // You'll add other types like 'E', 'R', 'W', etc. here
-            default:
-                // Optionally print or log unrecognized types
-                break;
-        }
-    }
-
-    private void sendNameResponse(String transactionID, InetAddress address, int port) throws Exception {
-        String response = transactionID + " H " + nodeName + " ";
-        byte[] data = response.getBytes(StandardCharsets.UTF_8);
-        DatagramPacket packet = new DatagramPacket(data, data.length, address, port);
-        socket.send(packet);
     }
 
     @Override
