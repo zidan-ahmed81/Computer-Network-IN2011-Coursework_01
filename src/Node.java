@@ -18,26 +18,21 @@ interface NodeInterface {
 
 public class Node implements NodeInterface {
 
+    // The node's own name.
     private String nodeName;
+
+    // The UDP socket used for sending/receiving messages.
     private DatagramSocket socket;
-    private List<InetSocketAddress> neighbors;
-    private Map<String, String> dataStore;
-    private Stack<String> relayStack;
 
-    public Node() throws Exception {
-        // Initialize all collections to avoid null pointer exceptions.
-        this.neighbors = new ArrayList<>();
-        this.dataStore = new ConcurrentHashMap<>();
-        this.relayStack = new Stack<>();
-    }
+    // A simple local store for key/value pairs.
+    private Map<String, String> localStore = new ConcurrentHashMap<>();
 
-    private String generateTransactionId() {
-        Random rand = new Random();
-        // Generate two characters that are not spaces.
-        char c1 = (char)(33 + rand.nextInt(94)); // ASCII 33 (!) to 126 (~)
-        char c2 = (char)(33 + rand.nextInt(94));
-        return "" + c1 + c2;
-    }
+    // A list representing your known nodes (routing table).
+// In a real implementation, you would choose the closest nodes based on hash distance.
+    private List<InetSocketAddress> knownNodes = Collections.synchronizedList(new ArrayList<>());
+    private ArrayDeque<String> relayStack;
+    private HashMap<Object, Object> dataStore;
+
 
     @Override
     public void setNodeName(String nodeName) throws Exception {
@@ -102,80 +97,82 @@ public class Node implements NodeInterface {
 
     @Override
     public String read(String key) throws Exception {
-        // First, check if we have the key locally.
-        if (dataStore.containsKey(key)) {
-            return dataStore.get(key);
+        // 1. First, check if the key exists locally.
+        if (localStore.containsKey(key)) {
+            return localStore.get(key);
         }
 
-        // Otherwise, try each neighbor until we get a positive response.
-        for (InetSocketAddress neighbor : neighbors) {
-            String value = sendReadRequest(neighbor, key);
-            if (value != null) {
-                // Optionally, cache the value locally.
-                dataStore.put(key, value);
-                return value;
+        // 2. Generate a transaction ID for this request.
+        // A simple example: generate two random letters (ensuring they're not spaces).
+        String txID = generateTxID();
+
+        // 3. Construct the read request message.
+        // According to the CRN protocol, a read request is: "<txID> R <key>"
+        String requestMessage = txID + " R " + key;
+        byte[] requestBytes = requestMessage.getBytes(StandardCharsets.UTF_8);
+
+        // 4. Determine the nearest nodes to the key.
+        // In a real implementation, you would use your routing table to get the three closest nodes.
+        // Here we simply return all known nodes.
+        List<InetSocketAddress> targets = getNearestNodes(key);
+
+        // 5. Send the read request to each target node.
+        for (InetSocketAddress target : targets) {
+            DatagramPacket packet = new DatagramPacket(requestBytes, requestBytes.length,
+                    target.getAddress(), target.getPort());
+            socket.send(packet);
+        }
+
+        // 6. Wait for a response with a timeout.
+        byte[] buffer = new byte[1024];
+        DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
+        long startTime = System.currentTimeMillis();
+        // We wait up to 5 seconds for a response (you might want to resend if none is received).
+        while (System.currentTimeMillis() - startTime < 5000) {
+            try {
+                socket.setSoTimeout(5000);
+                socket.receive(responsePacket);
+
+                // 7. Process the response message.
+                String response = new String(responsePacket.getData(), 0, responsePacket.getLength(),
+                        StandardCharsets.UTF_8);
+                // Verify that the transaction ID matches.
+                if (response.startsWith(txID)) {
+                    // The expected response format is: "<txID> S <responseChar> <value>"
+                    String[] parts = response.split(" ", 4);
+                    if (parts.length >= 3) {
+                        String responseChar = parts[2];
+                        if ("Y".equals(responseChar) && parts.length == 4) {
+                            // Condition A true: the remote node has the key.
+                            return parts[3];
+                        } else {
+                            // Either the key wasn’t found, or the response isn’t what we expected.
+                            // You could try additional nodes or return null.
+                            return null;
+                        }
+                    }
+                }
+            } catch (SocketTimeoutException e) {
+                // Timeout reached: break out of the loop.
+                break;
             }
         }
-        // If no neighbor returned a valid value, return null.
+        // If no valid response is received, return null.
         return null;
     }
 
-    // Sends a read request to a neighbor and waits for its response.
-    private String sendReadRequest(InetSocketAddress neighbor, String key) throws Exception {
-        // Generate a transaction ID (two non-space characters)
-        Random rand = new Random();
-        char c1 = (char)(33 + rand.nextInt(94)); // from '!' (33) to '~' (126)
-        char c2 = (char)(33 + rand.nextInt(94));
-        String transId = "" + c1 + c2;
+    // Helper method to generate a simple transaction ID.
+    private String generateTxID() {
+        Random random = new Random();
+        char c1 = (char) ('A' + random.nextInt(26));
+        char c2 = (char) ('A' + random.nextInt(26));
+        return "" + c1 + c2;
+    }
 
-        // Construct the read request message according to the CRN protocol:
-        // Format: [transId] " R " [key] " "
-        String message = transId + " R " + key + " ";
-        byte[] sendData = message.getBytes("UTF-8");
-
-        // Create and send the UDP packet to the neighbor
-        DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, neighbor.getAddress(), neighbor.getPort());
-        socket.send(sendPacket);
-
-        // Prepare a buffer to receive the response
-        byte[] recvBuffer = new byte[1024];
-        DatagramPacket recvPacket = new DatagramPacket(recvBuffer, recvBuffer.length);
-
-        // Set a timeout on the socket (e.g., 3 seconds)
-        socket.setSoTimeout(3000);
-
-        try {
-            socket.receive(recvPacket);
-        } catch (Exception e) {
-            // Timeout or other error – return null indicating no valid response was received.
-            return null;
-        }
-
-        // Convert the received data into a string.
-        String response = new String(recvPacket.getData(), 0, recvPacket.getLength(), "UTF-8");
-
-        // The expected response format is:
-        // [transId] " S " [responseChar] " " [responseValue (if any)]
-        // Check if the transaction ID matches.
-        if (!response.startsWith(transId)) {
-            return null;  // The response doesn't match our transaction.
-        }
-
-        // Split the response into parts.
-        // Expected parts: transId, "S", responseChar, (optional) responseValue.
-        String[] parts = response.split(" ", 4);
-        if (parts.length < 3) {
-            return null; // Malformed response.
-        }
-
-        String responseChar = parts[2];
-        // 'Y' indicates that the key was found.
-        if ("Y".equals(responseChar) && parts.length >= 4) {
-            return parts[3]; // Return the value from the response.
-        }
-
-        // Otherwise, key not found or not handled.
-        return null;
+    // Helper method to get the nearest nodes to the key.
+// This is a simplified version. In practice, use your routing table and the hash distance metric.
+    private List<InetSocketAddress> getNearestNodes(String key) {
+        return knownNodes;
     }
 
 
