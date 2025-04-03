@@ -51,20 +51,23 @@ public class Node implements NodeInterface {
                 System.out.println("Timeout reached, exiting handleIncomingMessages()");
                 return;
             }
-
             try {
                 byte[] buffer = new byte[1024];
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 socket.receive(packet);
-
-                String message = new String(packet.getData(), 0, packet.getLength());
-                System.out.println("Received message: " + message);
-
-                // For now we don't parse or reply to messages
+                processPacket(packet);  // Helper method call
             } catch (SocketTimeoutException e) {
-                // Continue waiting until delay expires
+                // Continue waiting for incoming messages until the delay expires
             }
         }
+    }
+
+    // Helper method to process incoming packets
+    private void processPacket(DatagramPacket packet) {
+        String message = new String(packet.getData(), 0, packet.getLength());
+        System.out.println("Received packet from "
+                + packet.getAddress() + ":" + packet.getPort()
+                + " -> " + message);
     }
 
     @Override
