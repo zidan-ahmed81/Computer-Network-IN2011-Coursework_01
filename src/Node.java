@@ -20,9 +20,16 @@ public class Node implements NodeInterface {
 
     private String nodeName;
     private DatagramSocket socket;
-    private List<InetSocketAddress> neighbors = new ArrayList<>();
-    private Map<String, String> dataStore = new ConcurrentHashMap<>();
-    private Stack<String> relayStack = new Stack<>();
+    private List<InetSocketAddress> neighbors;
+    private Map<String, String> dataStore;
+    private Stack<String> relayStack;
+
+    public Node() throws Exception {
+        // Initialize all collections to avoid null pointer exceptions.
+        this.neighbors = new ArrayList<>();
+        this.dataStore = new ConcurrentHashMap<>();
+        this.relayStack = new Stack<>();
+    }
 
     private String generateTransactionId() {
         Random rand = new Random();
@@ -115,41 +122,59 @@ public class Node implements NodeInterface {
 
     // Sends a read request to a neighbor and waits for its response.
     private String sendReadRequest(InetSocketAddress neighbor, String key) throws Exception {
-        String transId = generateTransactionId();
-        // Build the read request message as per the CRN protocol.
+        // Generate a transaction ID (two non-space characters)
+        Random rand = new Random();
+        char c1 = (char)(33 + rand.nextInt(94)); // from '!' (33) to '~' (126)
+        char c2 = (char)(33 + rand.nextInt(94));
+        String transId = "" + c1 + c2;
+
+        // Construct the read request message according to the CRN protocol:
         // Format: [transId] " R " [key] " "
         String message = transId + " R " + key + " ";
-        byte[] sendData = message.getBytes(StandardCharsets.UTF_8);
+        byte[] sendData = message.getBytes("UTF-8");
 
+        // Create and send the UDP packet to the neighbor
         DatagramPacket sendPacket = new DatagramPacket(sendData, sendData.length, neighbor.getAddress(), neighbor.getPort());
         socket.send(sendPacket);
 
-        // Set a timeout and wait for the response.
+        // Prepare a buffer to receive the response
         byte[] recvBuffer = new byte[1024];
         DatagramPacket recvPacket = new DatagramPacket(recvBuffer, recvBuffer.length);
-        socket.setSoTimeout(3000); // 3 seconds
+
+        // Set a timeout on the socket (e.g., 3 seconds)
+        socket.setSoTimeout(3000);
 
         try {
             socket.receive(recvPacket);
         } catch (Exception e) {
-            // Timeout or error.
+            // Timeout or other error – return null indicating no valid response was received.
             return null;
         }
 
-        String response = new String(recvPacket.getData(), 0, recvPacket.getLength(), StandardCharsets.UTF_8);
-        // Response format: [transId] " S " [responseChar] " " [responseString]
+        // Convert the received data into a string.
+        String response = new String(recvPacket.getData(), 0, recvPacket.getLength(), "UTF-8");
+
+        // The expected response format is:
+        // [transId] " S " [responseChar] " " [responseValue (if any)]
+        // Check if the transaction ID matches.
         if (!response.startsWith(transId)) {
-            return null;  // Transaction ID mismatch.
+            return null;  // The response doesn't match our transaction.
         }
 
+        // Split the response into parts.
+        // Expected parts: transId, "S", responseChar, (optional) responseValue.
         String[] parts = response.split(" ", 4);
         if (parts.length < 3) {
-            return null;  // Malformed response.
+            return null; // Malformed response.
         }
+
         String responseChar = parts[2];
+        // 'Y' indicates that the key was found.
         if ("Y".equals(responseChar) && parts.length >= 4) {
-            return parts[3];
+            return parts[3]; // Return the value from the response.
         }
+
+        // Otherwise, key not found or not handled.
         return null;
     }
 
