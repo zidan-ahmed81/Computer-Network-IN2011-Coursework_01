@@ -57,6 +57,11 @@ class AzureLabTest {
             node.popRelay(); // should print that stack is empty
 
 
+            System.out.println("Checking if 'D:jabberwocky0' exists...");
+            boolean exists = node.exists("D:jabberwocky0");
+            System.out.println("Result: " + exists);
+
+
             // Wait and hope that we get sent the address of some other nodes
             System.out.println("Waiting for another node to get in contact");
             node.handleIncomingMessages(15 * 1000);

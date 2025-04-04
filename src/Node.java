@@ -178,8 +178,37 @@ public class Node implements NodeInterface {
 
     @Override
     public boolean exists(String key) throws Exception {
-        return localStore.containsKey(key) || dataStore.containsKey(key);
+        // 1. Check local stores
+        if (localStore.containsKey(key) || dataStore.containsKey(key)) {
+            return true;
+        }
+
+        // 2. Ask neighbors using E → V message
+        for (InetSocketAddress neighbor : neighbors) {
+            byte[] txid = generateTransactionID();
+            String header = new String(txid, StandardCharsets.UTF_8) + " ";
+            String message = header + "E " + formatCRNString(key);
+            byte[] buffer = message.getBytes(StandardCharsets.UTF_8);
+
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length, neighbor.getAddress(), neighbor.getPort());
+            socket.send(packet);
+
+            try {
+                byte[] recvBuf = new byte[1024];
+                DatagramPacket response = new DatagramPacket(recvBuf, recvBuf.length);
+                socket.setSoTimeout(1000);
+                socket.receive(response);
+
+                String responseMsg = new String(response.getData(), 0, response.getLength(), StandardCharsets.UTF_8);
+                if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " V Y")) {
+                    return true;
+                }
+            } catch (SocketTimeoutException ignored) {}
+        }
+
+        return false;
     }
+
 
     @Override
     public String read(String key) throws Exception {
