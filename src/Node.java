@@ -27,7 +27,6 @@ public class Node implements NodeInterface {
     private Map<String, String> dataStore;
 
     // Routing table and relay stack
-    private List<InetSocketAddress> knownNodes;
     private List<InetSocketAddress> neighbors;
     private ArrayDeque<String> relayStack;
 
@@ -35,7 +34,6 @@ public class Node implements NodeInterface {
     public Node() {
         localStore = new ConcurrentHashMap<>();
         dataStore = new ConcurrentHashMap<>();
-        knownNodes = Collections.synchronizedList(new ArrayList<>());
         neighbors = new ArrayList<>();
         relayStack = new ArrayDeque<>();
         System.out.println("[DEBUG] Node constructor: Collections initialized.");
@@ -74,47 +72,13 @@ public class Node implements NodeInterface {
         System.out.println("Timeout reached, exiting handleIncomingMessages()");
     }
 
-    // Helper method to process incoming packets
     private void processPacket(DatagramPacket packet) throws Exception {
         String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
-        System.out.println("Received packet from " + packet.getAddress() + ":" + packet.getPort() + " -> " + message);
-
-        // Basic parsing: expect message format with a transaction ID and type.
-        String[] parts = message.split(" ", 4);
-        if (parts.length < 2) return;
-        String txID = parts[0];
-        String type = parts[1];
-
-        switch (type) {
-            case "G": // Name Request
-                String nameResponse = txID + " H " + nodeName;
-                byte[] respBytes = nameResponse.getBytes(StandardCharsets.UTF_8);
-                DatagramPacket respPacket = new DatagramPacket(respBytes, respBytes.length, packet.getAddress(), packet.getPort());
-                socket.send(respPacket);
-                System.out.println("Sent name response: " + nameResponse);
-                break;
-            case "R": // Read Request: "<txID> R <key>"
-                if (parts.length < 3) return;
-                String key = parts[2];
-                if (localStore.containsKey(key)) {
-                    String value = localStore.get(key);
-                    String readResponse = txID + " S Y " + value;
-                    byte[] readRespBytes = readResponse.getBytes(StandardCharsets.UTF_8);
-                    DatagramPacket readRespPacket = new DatagramPacket(readRespBytes, readRespBytes.length, packet.getAddress(), packet.getPort());
-                    socket.send(readRespPacket);
-                    System.out.println("Sent read response (Y) for key: " + key);
-                } else {
-                    String readResponse = txID + " S N ";
-                    byte[] readRespBytes = readResponse.getBytes(StandardCharsets.UTF_8);
-                    DatagramPacket readRespPacket = new DatagramPacket(readRespBytes, readRespBytes.length, packet.getAddress(), packet.getPort());
-                    socket.send(readRespPacket);
-                    System.out.println("Sent read response (N) for key: " + key);
-                }
-                break;
-            default:
-                System.out.println("Unknown message type: " + type);
-        }
+        System.out.println("Received packet from "
+                + packet.getAddress() + ":" + packet.getPort()
+                + " -> " + message);
     }
+
 
     @Override
     public boolean isActive(String nodeName) throws Exception {
@@ -141,44 +105,12 @@ public class Node implements NodeInterface {
     // Read: check local store then broadcast a read request to neighbors.
     @Override
     public String read(String key) throws Exception {
-        if (localStore.containsKey(key)) return localStore.get(key);
-
-        String txID = generateTxID();
-        String requestMessage = txID + " R " + key;
-        byte[] requestBytes = requestMessage.getBytes(StandardCharsets.UTF_8);
-
-        // Debug: print number of neighbors
-        System.out.println("[DEBUG] read(): Number of neighbors: " + neighbors.size());
-        for (InetSocketAddress neighbor : neighbors) {
-            System.out.println("[DEBUG] read(): Sending request to neighbor " +
-                    neighbor.getAddress().getHostAddress() + ":" + neighbor.getPort());
-            DatagramPacket packet = new DatagramPacket(requestBytes, requestBytes.length,
-                    neighbor.getAddress(), neighbor.getPort());
-            socket.send(packet);
+        String value = localStore.get(key);
+        if (value == null) {
+            return null;
+        } else {
+            return key + " = " + value;
         }
-
-        // Wait for a response up to 5 seconds.
-        byte[] buffer = new byte[1024];
-        DatagramPacket responsePacket = new DatagramPacket(buffer, buffer.length);
-        long startTime = System.currentTimeMillis();
-        while (System.currentTimeMillis() - startTime < 5000) {
-            try {
-                socket.setSoTimeout(5000);
-                socket.receive(responsePacket);
-                String response = new String(responsePacket.getData(), 0, responsePacket.getLength(), StandardCharsets.UTF_8);
-                if (response.startsWith(txID)) {
-                    String[] parts = response.split(" ", 4);
-                    if (parts.length >= 3 && "Y".equals(parts[2]) && parts.length == 4) {
-                        System.out.println("[DEBUG] read(): Received response: " + response);
-                        return parts[3];
-                    }
-                }
-            } catch (SocketTimeoutException e) {
-                System.out.println("[DEBUG] read(): Socket timeout waiting for response.");
-                break;
-            }
-        }
-        return null;
     }
 
     // Write: store the key/value pair locally.

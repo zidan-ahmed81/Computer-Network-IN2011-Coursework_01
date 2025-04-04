@@ -48,22 +48,23 @@ class AzureLabTest {
 
             // Wait and hope that we get sent the address of some other nodes
             System.out.println("Waiting for another node to get in contact");
-            node.handleIncomingMessages(12 * 1000);
+            node.handleIncomingMessages(5 * 1000);
 
-//            // Let's start with a test of reading key/value pairs stored on the network.
-//            // This should print out a poem.
-              // Hello
-//            System.out.println("Getting the poem...");
-//            for (int i = 0; i < 7; ++i) {
-//                String key = "D:jabberwocky" + i;
-//                String value = node.read(key);
-//                if (value == null) {
-//                    System.err.println("Can't find poem verse " + i);
+            // Let's start with a test of reading key/value pairs stored on the network.
+            // This should print out a poem.
+
+            System.out.println("Getting the poem...");
+            for (int i = 0; i < 7; ++i) {
+                String key = "D:jabberwocky" + i;
+                String value = node.read(key);
+                if (value == null) {
+                    System.err.println("Can't find poem verse " + i);
 //                    System.exit(2);
-//                } else {
-//                    System.out.println(value);
-//                }
-//            }
+                } else {
+                    System.out.println(value);
+                }
+            }
+
 
             // Now let's test writing a key/value pair
             System.out.println("Writing a marker so it's clear my code works");
