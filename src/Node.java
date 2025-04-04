@@ -176,9 +176,42 @@ public class Node implements NodeInterface {
 
     @Override
     public String read(String key) throws Exception {
-        String value = localStore.get(key);
-        return value == null ? null : key + " = " + value;
+        // 1. Check local store first
+        if (localStore.containsKey(key)) {
+            return key + " = " + localStore.get(key);
+        }
+
+        // 2. Ask all neighbors (brute-force version)
+        for (InetSocketAddress neighbor : neighbors) {
+            byte[] txid = generateTransactionID();
+            String header = new String(txid, StandardCharsets.UTF_8) + " ";
+            String message = header + "R " + formatCRNString(key);
+            byte[] buffer = message.getBytes(StandardCharsets.UTF_8);
+
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length, neighbor.getAddress(), neighbor.getPort());
+            socket.send(packet);
+
+            try {
+                byte[] recvBuf = new byte[1024];
+                DatagramPacket response = new DatagramPacket(recvBuf, recvBuf.length);
+                socket.setSoTimeout(1000);
+                socket.receive(response);
+
+                String responseMsg = new String(response.getData(), 0, response.getLength(), StandardCharsets.UTF_8);
+                if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " S ")) {
+                    String[] parts = responseMsg.substring(5).split(" ", 2);
+                    if (parts[0].equals("Y")) {
+                        return key + " = " + parts[1].trim();
+                    }
+                }
+            } catch (SocketTimeoutException ignored) {
+            }
+        }
+
+        // If nothing found
+        return null;
     }
+
 
     @Override
     public boolean write(String key, String value) throws Exception {
