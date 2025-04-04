@@ -291,13 +291,40 @@ public class Node implements NodeInterface {
 
     @Override
     public boolean CAS(String key, String currentValue, String newValue) throws Exception {
+        // 1. Store locally as a backup (optional)
         if (localStore.containsKey(key) && localStore.get(key).equals(currentValue)) {
             localStore.put(key, newValue);
             dataStore.put(key, newValue);
-            return true;
         }
+
+        // 2. Send to neighbors via CRN protocol
+        for (InetSocketAddress neighbor : neighbors) {
+            byte[] txid = generateTransactionID();
+            String header = new String(txid, StandardCharsets.UTF_8) + " ";
+            String message = header + "C " + formatCRNString(key) + formatCRNString(currentValue) + formatCRNString(newValue);
+            byte[] buffer = message.getBytes(StandardCharsets.UTF_8);
+
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length, neighbor.getAddress(), neighbor.getPort());
+            socket.send(packet);
+
+            try {
+                byte[] recvBuf = new byte[1024];
+                DatagramPacket response = new DatagramPacket(recvBuf, recvBuf.length);
+                socket.setSoTimeout(1000);
+                socket.receive(response);
+
+                String responseMsg = new String(response.getData(), 0, response.getLength(), StandardCharsets.UTF_8);
+                if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " D Y")) {
+                    System.out.println("[CAS] Success from neighbor " + neighbor);
+                    return true;
+                }
+            } catch (SocketTimeoutException ignored) {}
+        }
+
+        System.out.println("[CAS] Failed on all neighbors");
         return false;
     }
+
 
     public void bootstrap() throws Exception {
         neighbors.clear();

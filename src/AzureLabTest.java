@@ -96,6 +96,15 @@ class AzureLabTest {
             boolean exists = node.exists("D:jabberwocky0");
             System.out.println("Result from exists(): " + exists);
 
+            System.out.println("Testing network CAS operation...");
+            String key = "D:casNet";
+            node.write(key, "alpha");
+
+            boolean ok = node.CAS(key, "alpha", "beta");
+            System.out.println("CAS(alpha → beta): " + ok);  // should be true if value is alpha
+
+            String result = node.read(key);
+            System.out.println("Result: " + result);  // should show beta
 
             // Finally we will let other nodes know where we are
             // so that we can be contacted and can store data for others.
