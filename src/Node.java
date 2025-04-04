@@ -178,12 +178,13 @@ public class Node implements NodeInterface {
 
     @Override
     public boolean exists(String key) throws Exception {
-        // 1. Check local stores
+        // Step 1: Check local store
         if (localStore.containsKey(key) || dataStore.containsKey(key)) {
+            System.out.println("[exists] Found in local store");
             return true;
         }
 
-        // 2. Ask neighbors using E → V message
+        // Step 2: Network check via E → V
         for (InetSocketAddress neighbor : neighbors) {
             byte[] txid = generateTransactionID();
             String header = new String(txid, StandardCharsets.UTF_8) + " ";
@@ -201,11 +202,21 @@ public class Node implements NodeInterface {
 
                 String responseMsg = new String(response.getData(), 0, response.getLength(), StandardCharsets.UTF_8);
                 if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " V Y")) {
+                    System.out.println("[exists] Found via E → V from " + neighbor);
                     return true;
                 }
             } catch (SocketTimeoutException ignored) {}
         }
 
+        // Step 3: Optional fallback to read
+        String value = read(key);
+        if (value != null) {
+            System.out.println("[exists] Found using read() fallback");
+            return true;
+        }
+
+        // Not found
+        System.out.println("[exists] Key not found");
         return false;
     }
 
