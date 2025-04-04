@@ -18,15 +18,10 @@ interface NodeInterface {
 
 public class Node implements NodeInterface {
 
-    // Node identity and communication
     private String nodeName;
     private DatagramSocket socket;
-
-    // Local key/value stores
     private Map<String, String> localStore;
     private Map<String, String> dataStore;
-
-    // Routing table and relay stack
     public List<InetSocketAddress> neighbors;
     private ArrayDeque<String> relayStack;
 
@@ -73,42 +68,41 @@ public class Node implements NodeInterface {
 
     private void processPacket(DatagramPacket packet) throws Exception {
         String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
-        System.out.println("Received packet from "
-                + packet.getAddress() + ":" + packet.getPort()
-                + " -> " + message);
+        System.out.println("Received packet from " + packet.getAddress() + ":" + packet.getPort() + " -> " + message);
+    }
+
+    public boolean isActive(InetSocketAddress neighbor) throws Exception {
+        try {
+            byte[] txid = generateTransactionID();
+            String header = new String(txid, StandardCharsets.UTF_8) + " ";
+            String message = header + "G";
+            byte[] buffer = message.getBytes(StandardCharsets.UTF_8);
+
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length, neighbor.getAddress(), neighbor.getPort());
+            socket.send(packet);
+
+            byte[] recvBuf = new byte[1024];
+            DatagramPacket response = new DatagramPacket(recvBuf, recvBuf.length);
+            socket.setSoTimeout(1000);
+            socket.receive(response);
+
+            String responseMsg = new String(response.getData(), 0, response.getLength(), StandardCharsets.UTF_8);
+            if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " H ")) {
+                String returnedName = responseMsg.substring(5).trim();
+                System.out.println("Node at " + neighbor + " is active → " + returnedName);
+                return true;
+            }
+        } catch (SocketTimeoutException e) {
+            // No response
+        } catch (Exception e) {
+            System.err.println("[isActive] Error: " + e.getMessage());
+        }
+        return false;
     }
 
     @Override
     public boolean isActive(String nodeName) throws Exception {
-        for (InetSocketAddress neighbor : neighbors) {
-            try {
-                byte[] txid = generateTransactionID();
-                String header = new String(txid, StandardCharsets.UTF_8) + " ";
-                String message = header + "G";
-                byte[] buffer = message.getBytes(StandardCharsets.UTF_8);
-
-                DatagramPacket packet = new DatagramPacket(buffer, buffer.length, neighbor.getAddress(), neighbor.getPort());
-                socket.send(packet);
-
-                byte[] recvBuf = new byte[1024];
-                DatagramPacket response = new DatagramPacket(recvBuf, recvBuf.length);
-                socket.setSoTimeout(1000);
-                socket.receive(response);
-
-                String responseMsg = new String(response.getData(), 0, response.getLength(), StandardCharsets.UTF_8);
-                if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " H ")) {
-                    String returnedName = responseMsg.substring(5).trim();
-                    if (returnedName.equals(nodeName)) {
-                        return true;
-                    }
-                }
-
-            } catch (SocketTimeoutException e) {
-                // Ignore timeout
-            } catch (Exception e) {
-                System.err.println("[isActive] Error: " + e.getMessage());
-            }
-        }
+        System.err.println("[WARN] isActive(String) is not used in dynamic name discovery.");
         return false;
     }
 
@@ -117,23 +111,17 @@ public class Node implements NodeInterface {
         byte[] txid = new byte[2];
         do {
             rand.nextBytes(txid);
-        } while (txid[0] == 0x20 || txid[1] == 0x20); // avoid space character
+        } while (txid[0] == 0x20 || txid[1] == 0x20);
         return txid;
     }
 
     public void checkBootstrappedNodesActive() throws Exception {
-        System.out.println("=== Checking active status of bootstrapped nodes ===");
+        System.out.println("=== Checking active status of AzureLab nodes ===");
         for (InetSocketAddress neighbor : neighbors) {
-            String guessedName = guessNodeNameFromPort(neighbor.getPort());
-            System.out.print("Checking " + neighbor.getAddress().getHostAddress() + ":" + neighbor.getPort());
-            boolean isUp = isActive(guessedName);
-            System.out.println(" -> isActive(" + guessedName + ") = " + isUp);
+            boolean isUp = isActive(neighbor);
+            System.out.println("Checking " + neighbor.getAddress().getHostAddress() + ":" + neighbor.getPort() +
+                    " -> isActive = " + isUp);
         }
-    }
-
-    private String guessNodeNameFromPort(int port) {
-        int index = port - 20110;
-        return "N:test" + index;
     }
 
     @Override
@@ -182,7 +170,7 @@ public class Node implements NodeInterface {
         for (String ip : bootstrapIPs) {
             InetAddress addr = InetAddress.getByName(ip);
             for (int port = 20110; port <= 20116; port++) {
-                if (socket != null && socket.getLocalPort() == port) continue; // skip self
+                if (socket != null && socket.getLocalPort() == port) continue;
                 neighbors.add(new InetSocketAddress(addr, port));
             }
         }
