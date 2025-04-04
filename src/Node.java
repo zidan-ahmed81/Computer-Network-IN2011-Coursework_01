@@ -4,16 +4,16 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 interface NodeInterface {
-    public void setNodeName(String nodeName) throws Exception;
-    public void openPort(int portNumber) throws Exception;
-    public void handleIncomingMessages(int delay) throws Exception;
-    public boolean isActive(String nodeName) throws Exception;
-    public void pushRelay(String nodeName) throws Exception;
-    public void popRelay() throws Exception;
-    public boolean exists(String key) throws Exception;
-    public String read(String key) throws Exception;
-    public boolean write(String key, String value) throws Exception;
-    public boolean CAS(String key, String currentValue, String newValue) throws Exception;
+    void setNodeName(String nodeName) throws Exception;
+    void openPort(int portNumber) throws Exception;
+    void handleIncomingMessages(int delay) throws Exception;
+    boolean isActive(String nodeName) throws Exception;
+    void pushRelay(String nodeName) throws Exception;
+    void popRelay() throws Exception;
+    boolean exists(String key) throws Exception;
+    String read(String key) throws Exception;
+    boolean write(String key, String value) throws Exception;
+    boolean CAS(String key, String currentValue, String newValue) throws Exception;
 }
 
 public class Node implements NodeInterface {
@@ -30,7 +30,6 @@ public class Node implements NodeInterface {
         dataStore = new ConcurrentHashMap<>();
         neighbors = new ArrayList<>();
         relayStack = new ArrayDeque<>();
-        System.out.println("[DEBUG] Node constructor: Collections initialized.");
     }
 
     @Override
@@ -163,28 +162,26 @@ public class Node implements NodeInterface {
             throw new Exception("Relay node name must start with 'N:'");
         }
         relayStack.push(nodeName);
-        System.out.println("[DEBUG] Pushed to relay stack: " + nodeName);
+        System.out.println("Pushed to relay stack: " + nodeName);
     }
 
     @Override
     public void popRelay() throws Exception {
         if (!relayStack.isEmpty()) {
             String removed = relayStack.pop();
-            System.out.println("[DEBUG] Popped from relay stack: " + removed);
+            System.out.println("Popped from relay stack: " + removed);
         } else {
-            System.out.println("[DEBUG] Relay stack is already empty.");
+            System.out.println("Relay stack is already empty.");
         }
     }
 
     @Override
     public boolean exists(String key) throws Exception {
-        // Step 1: Check local store
         if (localStore.containsKey(key) || dataStore.containsKey(key)) {
             System.out.println("[exists] Found in local store");
             return true;
         }
 
-        // Step 2: Network check via E → V
         for (InetSocketAddress neighbor : neighbors) {
             byte[] txid = generateTransactionID();
             String header = new String(txid, StandardCharsets.UTF_8) + " ";
@@ -208,18 +205,15 @@ public class Node implements NodeInterface {
             } catch (SocketTimeoutException ignored) {}
         }
 
-        // Step 3: Optional fallback to read
         String value = read(key);
         if (value != null) {
             System.out.println("[exists] Found using read() fallback");
             return true;
         }
 
-        // Not found
         System.out.println("[exists] Key not found");
         return false;
     }
-
 
     @Override
     public String read(String key) throws Exception {
@@ -284,16 +278,13 @@ public class Node implements NodeInterface {
         return true;
     }
 
-
     @Override
     public boolean CAS(String key, String currentValue, String newValue) throws Exception {
-        // 1. Store locally as a backup (optional)
         if (localStore.containsKey(key) && localStore.get(key).equals(currentValue)) {
             localStore.put(key, newValue);
             dataStore.put(key, newValue);
         }
 
-        // 2. Send to neighbors via CRN protocol
         for (InetSocketAddress neighbor : neighbors) {
             byte[] txid = generateTransactionID();
             String header = new String(txid, StandardCharsets.UTF_8) + " ";
@@ -321,7 +312,6 @@ public class Node implements NodeInterface {
         return false;
     }
 
-
     public void bootstrap() throws Exception {
         neighbors.clear();
         String[] bootstrapIPs = {"10.200.51.18", "10.200.51.19"};
@@ -332,9 +322,9 @@ public class Node implements NodeInterface {
                 neighbors.add(new InetSocketAddress(addr, port));
             }
         }
-        System.out.println("[DEBUG] Bootstrap complete. Neighbors:");
+        System.out.println("Bootstrap complete. Neighbors:");
         for (InetSocketAddress n : neighbors) {
-            System.out.println("[DEBUG]   " + n.getAddress().getHostAddress() + ":" + n.getPort());
+            System.out.println(n.getAddress().getHostAddress() + ":" + n.getPort());
         }
     }
 
