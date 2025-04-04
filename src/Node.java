@@ -159,13 +159,20 @@ public class Node implements NodeInterface {
 
     @Override
     public void pushRelay(String nodeName) throws Exception {
+        if (nodeName == null || !nodeName.startsWith("N:")) {
+            throw new Exception("Relay node name must start with 'N:'");
+        }
         relayStack.push(nodeName);
+        System.out.println("[DEBUG] Pushed to relay stack: " + nodeName);
     }
 
     @Override
     public void popRelay() throws Exception {
         if (!relayStack.isEmpty()) {
-            relayStack.pop();
+            String removed = relayStack.pop();
+            System.out.println("[DEBUG] Popped from relay stack: " + removed);
+        } else {
+            System.out.println("[DEBUG] Relay stack is already empty.");
         }
     }
 
