@@ -223,12 +223,9 @@ public class Node implements NodeInterface {
 
     @Override
     public String read(String key) throws Exception {
-        // 1. Check local store first
         if (localStore.containsKey(key)) {
-            return key + " = " + localStore.get(key);
+            return localStore.get(key);
         }
-
-        // 2. Ask all neighbors (brute-force version)
         for (InetSocketAddress neighbor : neighbors) {
             byte[] txid = generateTransactionID();
             String header = new String(txid, StandardCharsets.UTF_8) + " ";
@@ -248,22 +245,19 @@ public class Node implements NodeInterface {
                 if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " S ")) {
                     String[] parts = responseMsg.substring(5).split(" ", 2);
                     if (parts[0].equals("Y")) {
-                        return key + " = " + parts[1].trim();
+                        return parts[1].trim();
                     }
                 }
-            } catch (SocketTimeoutException ignored) {
-            }
+            } catch (SocketTimeoutException ignored) {}
         }
-
-        // If nothing found
         return null;
     }
-
 
     @Override
     public boolean write(String key, String value) throws Exception {
         localStore.put(key, value);
         dataStore.put(key, value);
+        boolean acknowledged = false;
 
         for (InetSocketAddress neighbor : neighbors) {
             byte[] txid = generateTransactionID();
@@ -282,12 +276,14 @@ public class Node implements NodeInterface {
 
                 String responseMsg = new String(response.getData(), 0, response.getLength(), StandardCharsets.UTF_8);
                 if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " X Y")) {
-                    return true;
+                    acknowledged = true;
                 }
             } catch (SocketTimeoutException ignored) {}
         }
-        return false;
+
+        return true;
     }
+
 
     @Override
     public boolean CAS(String key, String currentValue, String newValue) throws Exception {
