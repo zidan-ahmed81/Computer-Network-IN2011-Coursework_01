@@ -52,6 +52,7 @@ class AzureLabTest {
 
 //            // Let's start with a test of reading key/value pairs stored on the network.
 //            // This should print out a poem.
+              // Hello
 //            System.out.println("Getting the poem...");
 //            for (int i = 0; i < 7; ++i) {
 //                String key = "D:jabberwocky" + i;
