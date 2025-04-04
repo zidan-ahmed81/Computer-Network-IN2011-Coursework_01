@@ -71,7 +71,7 @@ public class Node implements NodeInterface {
         System.out.println("Received packet from " + packet.getAddress() + ":" + packet.getPort() + " -> " + message);
     }
 
-    public boolean isActive(InetSocketAddress neighbor) throws Exception {
+    public boolean checkNodeIsActive(InetSocketAddress neighbor) throws Exception {
         try {
             byte[] txid = generateTransactionID();
             String header = new String(txid, StandardCharsets.UTF_8) + " ";
@@ -95,15 +95,43 @@ public class Node implements NodeInterface {
         } catch (SocketTimeoutException e) {
             // No response
         } catch (Exception e) {
-            System.err.println("[isActive] Error: " + e.getMessage());
+            System.err.println("[checkNodeIsActive] Error: " + e.getMessage());
         }
         return false;
     }
 
     @Override
     public boolean isActive(String nodeName) throws Exception {
-        System.err.println("[WARN] isActive(String) is not used in dynamic name discovery.");
+        for (InetSocketAddress neighbor : neighbors) {
+            String foundName = queryNodeName(neighbor);
+            if (foundName != null && foundName.equals(nodeName)) {
+                return true;
+            }
+        }
         return false;
+    }
+
+    private String queryNodeName(InetSocketAddress neighbor) throws Exception {
+        try {
+            byte[] txid = generateTransactionID();
+            String header = new String(txid, StandardCharsets.UTF_8) + " ";
+            String message = header + "G";
+            byte[] buffer = message.getBytes(StandardCharsets.UTF_8);
+
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length, neighbor.getAddress(), neighbor.getPort());
+            socket.send(packet);
+
+            byte[] recvBuf = new byte[1024];
+            DatagramPacket response = new DatagramPacket(recvBuf, recvBuf.length);
+            socket.setSoTimeout(1000);
+            socket.receive(response);
+
+            String responseMsg = new String(response.getData(), 0, response.getLength(), StandardCharsets.UTF_8);
+            if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " H ")) {
+                return responseMsg.substring(5).trim();
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 
     private byte[] generateTransactionID() {
@@ -115,10 +143,15 @@ public class Node implements NodeInterface {
         return txid;
     }
 
+    private String formatCRNString(String input) {
+        int spaceCount = (int) input.chars().filter(ch -> ch == ' ').count();
+        return spaceCount + " " + input + " ";
+    }
+
     public void checkBootstrappedNodesActive() throws Exception {
         System.out.println("=== Checking active status of AzureLab nodes ===");
         for (InetSocketAddress neighbor : neighbors) {
-            boolean isUp = isActive(neighbor);
+            boolean isUp = checkNodeIsActive(neighbor);
             System.out.println("Checking " + neighbor.getAddress().getHostAddress() + ":" + neighbor.getPort() +
                     " -> isActive = " + isUp);
         }
@@ -143,16 +176,19 @@ public class Node implements NodeInterface {
 
     @Override
     public String read(String key) throws Exception {
-        // 1. Check local store first
-        if (localStore.containsKey(key)) {
-            return key + " = " + localStore.get(key);
-        }
+        String value = localStore.get(key);
+        return value == null ? null : key + " = " + value;
+    }
 
-        // 2. Ask all neighbors (brute-force version)
+    @Override
+    public boolean write(String key, String value) throws Exception {
+        localStore.put(key, value);
+        dataStore.put(key, value);
+
         for (InetSocketAddress neighbor : neighbors) {
             byte[] txid = generateTransactionID();
             String header = new String(txid, StandardCharsets.UTF_8) + " ";
-            String message = header + "R " + formatCRNString(key);
+            String message = header + "W " + formatCRNString(key) + formatCRNString(value);
             byte[] buffer = message.getBytes(StandardCharsets.UTF_8);
 
             DatagramPacket packet = new DatagramPacket(buffer, buffer.length, neighbor.getAddress(), neighbor.getPort());
@@ -165,31 +201,12 @@ public class Node implements NodeInterface {
                 socket.receive(response);
 
                 String responseMsg = new String(response.getData(), 0, response.getLength(), StandardCharsets.UTF_8);
-                if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " S ")) {
-                    String[] parts = responseMsg.substring(5).split(" ", 2);
-                    if (parts[0].equals("Y")) {
-                        return key + " = " + parts[1].trim();
-                    }
+                if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " X Y")) {
+                    return true;
                 }
-            } catch (SocketTimeoutException ignored) {
-            }
+            } catch (SocketTimeoutException ignored) {}
         }
-
-        // If nothing found
-        return null;
-    }
-
-    private String formatCRNString(String input) {
-        int spaceCount = (int) input.chars().filter(ch -> ch == ' ').count();
-        return spaceCount + " " + input + " ";
-    }
-
-
-    @Override
-    public boolean write(String key, String value) throws Exception {
-        localStore.put(key, value);
-        dataStore.put(key, value);
-        return true;
+        return false;
     }
 
     @Override
