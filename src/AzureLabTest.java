@@ -49,7 +49,7 @@ class AzureLabTest {
 
             // Wait and hope that we get sent the address of some other nodes
             System.out.println("Waiting for another node to get in contact");
-            node.handleIncomingMessages(5 * 1000);
+            node.handleIncomingMessages(15 * 1000);
 
             // Let's start with a test of reading key/value pairs stored on the network.
             // This should print out a poem.
