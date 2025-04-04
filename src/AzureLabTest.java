@@ -92,9 +92,7 @@ class AzureLabTest {
             }
 
 
-            System.out.println("Checking if 'D:jabberwocky0' exists...");
-            boolean exists = node.exists("D:jabberwocky0");
-            System.out.println("Result: " + exists);
+            boolean exists = (node.read("D:jabberwocky0") != null);
 
             // Finally we will let other nodes know where we are
             // so that we can be contacted and can store data for others.
