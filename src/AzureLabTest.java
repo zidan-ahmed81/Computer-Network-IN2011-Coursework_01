@@ -87,7 +87,7 @@ class AzureLabTest {
             node.write(nodeName, ipAddress + ":" + port);
 
             System.out.println("Handling incoming connections");
-            node.handleIncomingMessages(0);
+            node.handleIncomingMessages(1000);
 
 
         } catch (Exception e) {
