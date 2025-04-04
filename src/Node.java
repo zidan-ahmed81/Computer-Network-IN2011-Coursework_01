@@ -245,7 +245,7 @@ public class Node implements NodeInterface {
                 if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " S ")) {
                     String[] parts = responseMsg.substring(5).split(" ", 2);
                     if (parts[0].equals("Y")) {
-                        return parts[1].trim();
+                        return key + " = " + parts[1].trim();
                     }
                 }
             } catch (SocketTimeoutException ignored) {}
