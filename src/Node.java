@@ -27,10 +27,9 @@ public class Node implements NodeInterface {
     private Map<String, String> dataStore;
 
     // Routing table and relay stack
-    private List<InetSocketAddress> neighbors;
+    public List<InetSocketAddress> neighbors;
     private ArrayDeque<String> relayStack;
 
-    // Constructor: initialize all collections
     public Node() {
         localStore = new ConcurrentHashMap<>();
         dataStore = new ConcurrentHashMap<>();
@@ -51,7 +50,7 @@ public class Node implements NodeInterface {
     @Override
     public void openPort(int portNumber) throws Exception {
         socket = new DatagramSocket(portNumber);
-        socket.setSoTimeout(1000); // Timeout to periodically check in handleIncomingMessages()
+        socket.setSoTimeout(1000);
         System.out.println("Opened port: " + portNumber);
     }
 
@@ -59,14 +58,14 @@ public class Node implements NodeInterface {
     public void handleIncomingMessages(int delay) throws Exception {
         System.out.println("Listening for incoming messages...");
         long endTime = System.currentTimeMillis() + delay;
-        while (System.currentTimeMillis() < endTime) {
+        while (delay == 0 || System.currentTimeMillis() < endTime) {
             try {
                 byte[] buffer = new byte[1024];
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 socket.receive(packet);
                 processPacket(packet);
             } catch (SocketTimeoutException e) {
-                // Continue waiting until endTime is reached.
+                // Timeout - loop again
             }
         }
         System.out.println("Timeout reached, exiting handleIncomingMessages()");
@@ -79,10 +78,62 @@ public class Node implements NodeInterface {
                 + " -> " + message);
     }
 
-
     @Override
     public boolean isActive(String nodeName) throws Exception {
-        return true;  // Minimal implementation always returns true.
+        for (InetSocketAddress neighbor : neighbors) {
+            try {
+                byte[] txid = generateTransactionID();
+                String header = new String(txid, StandardCharsets.UTF_8) + " ";
+                String message = header + "G";
+                byte[] buffer = message.getBytes(StandardCharsets.UTF_8);
+
+                DatagramPacket packet = new DatagramPacket(buffer, buffer.length, neighbor.getAddress(), neighbor.getPort());
+                socket.send(packet);
+
+                byte[] recvBuf = new byte[1024];
+                DatagramPacket response = new DatagramPacket(recvBuf, recvBuf.length);
+                socket.setSoTimeout(1000);
+                socket.receive(response);
+
+                String responseMsg = new String(response.getData(), 0, response.getLength(), StandardCharsets.UTF_8);
+                if (responseMsg.startsWith(new String(txid, StandardCharsets.UTF_8) + " H ")) {
+                    String returnedName = responseMsg.substring(5).trim();
+                    if (returnedName.equals(nodeName)) {
+                        return true;
+                    }
+                }
+
+            } catch (SocketTimeoutException e) {
+                // Ignore timeout
+            } catch (Exception e) {
+                System.err.println("[isActive] Error: " + e.getMessage());
+            }
+        }
+        return false;
+    }
+
+    private byte[] generateTransactionID() {
+        Random rand = new Random();
+        byte[] txid = new byte[2];
+        do {
+            rand.nextBytes(txid);
+        } while (txid[0] == 0x20 || txid[1] == 0x20); // avoid space character
+        return txid;
+    }
+
+    public void checkBootstrappedNodesActive() throws Exception {
+        System.out.println("=== Checking active status of bootstrapped nodes ===");
+        for (InetSocketAddress neighbor : neighbors) {
+            String guessedName = guessNodeNameFromPort(neighbor.getPort());
+            System.out.print("Checking " + neighbor.getAddress().getHostAddress() + ":" + neighbor.getPort());
+            boolean isUp = isActive(guessedName);
+            System.out.println(" -> isActive(" + guessedName + ") = " + isUp);
+        }
+    }
+
+    private String guessNodeNameFromPort(int port) {
+        int index = port - 20110;
+        return "N:test" + index;
     }
 
     @Override
@@ -102,18 +153,12 @@ public class Node implements NodeInterface {
         return localStore.containsKey(key) || dataStore.containsKey(key);
     }
 
-    // Read: check local store then broadcast a read request to neighbors.
     @Override
     public String read(String key) throws Exception {
         String value = localStore.get(key);
-        if (value == null) {
-            return null;
-        } else {
-            return key + " = " + value;
-        }
+        return value == null ? null : key + " = " + value;
     }
 
-    // Write: store the key/value pair locally.
     @Override
     public boolean write(String key, String value) throws Exception {
         localStore.put(key, value);
@@ -121,7 +166,6 @@ public class Node implements NodeInterface {
         return true;
     }
 
-    // CAS: update the key if the current value matches.
     @Override
     public boolean CAS(String key, String currentValue, String newValue) throws Exception {
         if (localStore.containsKey(key) && localStore.get(key).equals(currentValue)) {
@@ -132,17 +176,14 @@ public class Node implements NodeInterface {
         return false;
     }
 
-    // Bootstrap: initialize the neighbors list with the Azure Lab nodes.
     public void bootstrap() throws Exception {
         neighbors.clear();
         String[] bootstrapIPs = {"10.200.51.18", "10.200.51.19"};
         for (String ip : bootstrapIPs) {
             InetAddress addr = InetAddress.getByName(ip);
             for (int port = 20110; port <= 20116; port++) {
-                InetSocketAddress neighborAddr = new InetSocketAddress(addr, port);
-                // Skip our own address if applicable
-                if (socket != null && socket.getLocalPort() == port) continue;
-                neighbors.add(neighborAddr);
+                if (socket != null && socket.getLocalPort() == port) continue; // skip self
+                neighbors.add(new InetSocketAddress(addr, port));
             }
         }
         System.out.println("[DEBUG] Bootstrap complete. Neighbors:");
@@ -151,15 +192,6 @@ public class Node implements NodeInterface {
         }
     }
 
-    // Helper method: generate a two-character transaction ID.
-    private String generateTxID() {
-        Random random = new Random();
-        char c1 = (char) ('A' + random.nextInt(26));
-        char c2 = (char) ('A' + random.nextInt(26));
-        return "" + c1 + c2;
-    }
-
-    // Graceful shutdown: close the UDP socket.
     public void shutdown() {
         if (socket != null && !socket.isClosed()) {
             socket.close();

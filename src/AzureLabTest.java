@@ -45,6 +45,7 @@ class AzureLabTest {
             int port = 20110;
             node.openPort(port);
             node.bootstrap();
+            node.checkBootstrappedNodesActive();
 
             // Wait and hope that we get sent the address of some other nodes
             System.out.println("Waiting for another node to get in contact");
@@ -76,6 +77,9 @@ class AzureLabTest {
                 // Read it back to be sure
                 System.out.println(node.read(key));
             }
+
+
+
 
             // Finally we will let other nodes know where we are
             // so that we can be contacted and can store data for others.
